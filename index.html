@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Eisenhower Matrix Hub | PDCA戦略＆絶対保存タスク管理</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <!-- Google Fonts for Modern Typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;700;800&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Background Glow Elements -->
+    <div class="bg-glow glow-1"></div>
+    <div class="bg-glow glow-2"></div>
+    <div class="bg-glow glow-3"></div>
+
+    <!-- Main Container -->
+    <div class="app-container">
+        <!-- Header (Refined 2-Tier Layout to NEVER overlap with Add Task Button) -->
+        <header class="app-header">
+            <!-- Top Tier: Brand + Primary Actions -->
+            <div class="header-top-tier">
+                <div class="header-brand">
+                    <div class="brand-logo">
+                        <i class="fa-solid fa-layer-group"></i>
+                    </div>
+                    <div>
+                        <h1 class="brand-title">Matrix<span>Hub</span> <small class="pdca-tag">PDCA Engine</small></h1>
+                        <p class="brand-subtitle">戦略仮説＆振り返り強制機能・絶対保存データ保護</p>
+                    </div>
+                </div>
+
+                <!-- Primary Action Buttons (Spacious & Never Overlapping) -->
+                <div class="header-actions">
+                    <!-- Direct Local File Sync Status Badge (Click to Re-verify on start) -->
+                    <div class="file-sync-badge" id="file-sync-status" title="クリックしてブラウザ再起動後のファイル同期接続をただちに再開する">
+                        <i class="fa-solid fa-hard-drive text-q2"></i>
+                        <span id="file-sync-text">PCファイル未連携 (ブラウザ内保護中)</span>
+                    </div>
+
+                    <button id="btn-link-local-file" class="btn btn-secondary file-link-btn" title="一度ファイルを選択すれば、ウェブを閉じても次回から自動再接続＆直接上書き保存されます！">
+                        <i class="fa-solid fa-folder-tree text-q2"></i> <span>フォルダ連携 (永続)</span>
+                    </button>
+
+                    <button id="btn-direct-save-file" class="btn btn-success file-save-btn hidden" title="リンクされたローカルファイルへ今すぐ手動直接書き込み（自動同期中も利用可）">
+                        <i class="fa-solid fa-floppy-disk"></i> <span>ファイル直保存</span>
+                    </button>
+
+                    <!-- Save Status & Quick Manual Save -->
+                    <div class="save-status-badge" id="save-status-indicator" title="データは自動保存・バックアップされています">
+                        <i class="fa-solid fa-shield-check text-q2"></i>
+                        <span id="last-saved-time">データ保護中</span>
+                    </div>
+
+                    <button id="btn-add-task" class="btn btn-primary glow-btn add-task-btn">
+                        <i class="fa-solid fa-plus"></i> 新規タスク追加
+                    </button>
+
+                    <button id="btn-open-backup" class="btn btn-secondary backup-btn" title="バックアップ履歴と復元">
+                        <i class="fa-solid fa-clock-rotate-left"></i> <span class="btn-text-sm">データ復元</span>
+                    </button>
+
+                    <div class="dropdown">
+                        <button class="btn btn-icon btn-secondary" title="データ操作＆設定メニュー" id="btn-menu">
+                            <i class="fa-solid fa-ellipsis-vertical"></i>
+                        </button>
+                        <div class="dropdown-menu" id="dropdown-menu">
+                            <button id="btn-menu-link-local"><i class="fa-solid fa-folder-tree text-q2"></i> 📂 PCファイルと直接リンク (推奨)</button>
+                            <button id="btn-menu-direct-save"><i class="fa-solid fa-floppy-disk text-success"></i> 💾 リンク中ファイルへ上書き保存</button>
+                            <div class="dropdown-divider"></div>
+                            <button id="btn-instant-save-json"><i class="fa-solid fa-download text-q2"></i> ファイルとしてダウンロード (JSON)</button>
+                            <label for="input-import-json" class="dropdown-item-label">
+                                <i class="fa-solid fa-folder-open text-q1"></i> ファイルから読込・復元 (JSON)
+                                <input type="file" id="input-import-json" accept=".json" style="display: none;">
+                            </label>
+                            <div class="dropdown-divider"></div>
+                            <button id="btn-load-sample"><i class="fa-solid fa-wand-magic-sparkles"></i> サンプルデータ投入</button>
+                            <div class="dropdown-divider"></div>
+                            <button id="btn-clear-all" class="text-danger"><i class="fa-solid fa-trash"></i> 全データクリア</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bottom Tier: Quick Stats Grid (Clean separation) -->
+            <div class="header-bottom-tier">
+                <div class="header-stats-grid">
+                    <div class="stat-badge q1-stat" title="緊急度あり ＆ 重要度あり">
+                        <span class="stat-label"><i class="fa-solid fa-fire"></i> 第I領域 (必須・危機)</span>
+                        <span class="stat-value" id="stat-q1">0</span>
+                    </div>
+                    <div class="stat-badge q2-stat" title="緊急度なし ＆ 重要度あり (最重要投資)">
+                        <span class="stat-label"><i class="fa-solid fa-gem"></i> 第II領域 (価値・投資)</span>
+                        <span class="stat-value" id="stat-q2">0</span>
+                    </div>
+                    <div class="stat-badge q3-stat" title="緊急度あり ＆ 重要度なし">
+                        <span class="stat-label"><i class="fa-solid fa-bolt-lightning"></i> 第III領域 (見せかけ)</span>
+                        <span class="stat-value" id="stat-q3">0</span>
+                    </div>
+                    <div class="stat-badge q4-stat" title="緊急度なし ＆ 重要度なし">
+                        <span class="stat-label"><i class="fa-solid fa-trash-can"></i> 第IV領域 (無駄)</span>
+                        <span class="stat-value" id="stat-q4">0</span>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Navigation Tabs -->
+        <nav class="app-nav">
+            <div class="nav-tabs-group">
+                <button class="nav-tab active" data-view="matrix">
+                    <i class="fa-solid fa-chart-line"></i> 2軸マトリックス・グラフ
+                </button>
+                <button class="nav-tab" data-view="board">
+                    <i class="fa-solid fa-table-columns"></i> 4象限カンバン・ボード
+                </button>
+                <button class="nav-tab" data-view="analytics">
+                    <i class="fa-solid fa-chart-pie"></i> アナリティクス ＆ AIコーチング
+                </button>
+            </div>
+
+            <!-- Search & Filter Bar -->
+            <div class="nav-filters">
+                <div class="search-box">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                    <input type="text" id="search-input" placeholder="タスクや仮説を検索...">
+                </div>
+                <select id="filter-category" class="filter-select">
+                    <option value="all">全カテゴリー</option>
+                    <option value="仕事">💼 仕事</option>
+                    <option value="自己投資・学習">📚 自己投資・学習</option>
+                    <option value="健康・生活">🏃 健康・生活</option>
+                    <option value="人間関係">🤝 人間関係</option>
+                    <option value="その他">📌 その他</option>
+                </select>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="toggle-completed">
+                    <span class="toggle-slider"></span>
+                    <span class="toggle-label">完了済みを表示</span>
+                </label>
+            </div>
+        </nav>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- VIEW 1: 2軸マトリックス・グラフ（散布図＆ドラッグ＆ドロップ） -->
+            <section id="view-matrix" class="view-panel active">
+                <div class="matrix-graph-header">
+                    <div class="matrix-guide">
+                        <i class="fa-solid fa-hand-pointer"></i>
+                        <span>タスクを<strong>ドラッグ＆ドロップ</strong>して緊急度と重要度を調整！端っこ(0%/100%)でも文字がはみ出ない<strong>安全領域設計</strong>。</span>
+                    </div>
+                    <div class="matrix-legend">
+                        <span class="legend-item"><span class="dot dot-q1"></span> 第I: 緊急＆重要</span>
+                        <span class="legend-item"><span class="dot dot-q2"></span> 第II: 非緊急＆重要</span>
+                        <span class="legend-item"><span class="dot dot-q3"></span> 第III: 緊急＆非重要</span>
+                        <span class="legend-item"><span class="dot dot-q4"></span> 第IV: 非緊急＆非重要</span>
+                    </div>
+                </div>
+
+                <!-- Graph Wrapper (Separated Axis Layout: Never overlaps inside coordinates!) -->
+                <div class="matrix-graph-wrapper">
+                    <!-- Top Axis Info Bar (Clean horizontal tags above canvas) -->
+                    <div class="matrix-axis-header-bar">
+                        <div class="axis-tag y-axis-tag">
+                            <i class="fa-solid fa-arrow-up text-q2"></i>
+                            <span><strong>縦軸 (Y軸)：重要度</strong> (インパクト・将来価値)</span>
+                        </div>
+                        <div class="axis-tag x-axis-tag">
+                            <i class="fa-solid fa-arrow-right text-q1"></i>
+                            <span><strong>横軸 (X軸)：緊急度</strong> (締切・時間の切迫度)</span>
+                        </div>
+                    </div>
+
+                    <!-- Main Graph Grid Container (Pure Coordinates - No labels inside!) -->
+                    <div class="matrix-graph-container" id="matrix-canvas-area">
+                        <!-- Background Quadrants -->
+                        <div class="quadrant-bg q2-bg">
+                            <div class="quadrant-title">
+                                <span class="q-badge q2">第II領域</span>
+                                <h4>価値・投資の領域</h4>
+                                <p>緊急度：低 / 重要度：高</p>
+                            </div>
+                        </div>
+                        <div class="quadrant-bg q1-bg">
+                            <div class="quadrant-title">
+                                <span class="q-badge q1">第I領域</span>
+                                <h4>必須・危機の領域</h4>
+                                <p>緊急度：高 / 重要度：高</p>
+                            </div>
+                        </div>
+                        <div class="quadrant-bg q4-bg">
+                            <div class="quadrant-title">
+                                <span class="q-badge q4">第IV領域</span>
+                                <h4>無駄・過剰の領域</h4>
+                                <p>緊急度：低 / 重要度：低</p>
+                            </div>
+                        </div>
+                        <div class="quadrant-bg q3-bg">
+                            <div class="quadrant-title">
+                                <span class="q-badge q3">第III領域</span>
+                                <h4>錯覚・見せかけの領域</h4>
+                                <p>緊急度：高 / 重要度：低</p>
+                            </div>
+                        </div>
+
+                        <!-- Axis Lines -->
+                        <div class="graph-axis-y"></div>
+                        <div class="graph-axis-x"></div>
+
+                        <!-- Center Crosshair Marker -->
+                        <div class="graph-center-marker">50%</div>
+
+                        <!-- Tasks injected here as draggable points -->
+                        <div id="matrix-tasks-layer" class="matrix-tasks-layer"></div>
+                    </div>
+
+                    <!-- Bottom X-Axis Dedicated Footer -->
+                    <div class="matrix-axis-footer-bar">
+                        <div class="bottom-x-label">
+                            <span>緊急度 (締切・時間の切迫度) ➡</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- VIEW 2: 4象限カンバンボード -->
+            <section id="view-board" class="view-panel">
+                <div class="board-grid">
+                    <!-- Q1 Column -->
+                    <div class="board-column q1-column">
+                        <div class="column-header">
+                            <div class="header-top">
+                                <span class="column-badge q1-badge"><i class="fa-solid fa-fire"></i> 第I領域</span>
+                                <span class="task-count" id="count-board-q1">0</span>
+                            </div>
+                            <h3>必須・危機の領域</h3>
+                            <p class="column-desc">緊急度：あり ＆ 重要度：あり</p>
+                        </div>
+                        <div class="column-tasks" id="board-q1-list"></div>
+                    </div>
+
+                    <!-- Q2 Column -->
+                    <div class="board-column q2-column">
+                        <div class="column-header">
+                            <div class="header-top">
+                                <span class="column-badge q2-badge"><i class="fa-solid fa-gem"></i> 第II領域 (おすすめ投資)</span>
+                                <span class="task-count" id="count-board-q2">0</span>
+                            </div>
+                            <h3>価値・投資の領域</h3>
+                            <p class="column-desc">緊急度：なし ＆ 重要度：あり</p>
+                        </div>
+                        <div class="column-tasks" id="board-q2-list"></div>
+                    </div>
+
+                    <!-- Q3 Column -->
+                    <div class="board-column q3-column">
+                        <div class="column-header">
+                            <div class="header-top">
+                                <span class="column-badge q3-badge"><i class="fa-solid fa-bolt-lightning"></i> 第III領域</span>
+                                <span class="task-count" id="count-board-q3">0</span>
+                            </div>
+                            <h3>錯覚・見せかけの領域</h3>
+                            <p class="column-desc">緊急度：あり ＆ 重要度：なし</p>
+                        </div>
+                        <div class="column-tasks" id="board-q3-list"></div>
+                    </div>
+
+                    <!-- Q4 Column -->
+                    <div class="board-column q4-column">
+                        <div class="column-header">
+                            <div class="header-top">
+                                <span class="column-badge q4-badge"><i class="fa-solid fa-trash-can"></i> 第IV領域</span>
+                                <span class="task-count" id="count-board-q4">0</span>
+                            </div>
+                            <h3>無駄・過剰の領域</h3>
+                            <p class="column-desc">緊急度：なし ＆ 重要度：なし</p>
+                        </div>
+                        <div class="column-tasks" id="board-q4-list"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- VIEW 3: アナリティクス ＆ AIコーチング -->
+            <section id="view-analytics" class="view-panel">
+                <div class="analytics-layout">
+                    <!-- Left: Coaching Advice & Summary -->
+                    <div class="analytics-card coaching-card">
+                        <div class="coaching-header">
+                            <div class="coaching-icon"><i class="fa-solid fa-robot"></i></div>
+                            <div>
+                                <h3>スマート時間管理 ＆ PDCAコーチ</h3>
+                                <p>タスク配置＆PDCA振り返りに基づいた改善アドバイス</p>
+                            </div>
+                        </div>
+                        <div class="coaching-content" id="coaching-message-container">
+                            <!-- Dynamically generated advice -->
+                        </div>
+                    </div>
+
+                    <!-- Right: Distribution Stats -->
+                    <div class="analytics-card distribution-card">
+                        <h3>領域別バランス分析</h3>
+                        <p class="card-subtitle">理想的な時間配分を目指しましょう（第II領域への投資を最優先に）</p>
+                        
+                        <div class="stats-bars-container" id="stats-bars">
+                            <!-- Q1 Stat Bar -->
+                            <div class="stat-bar-group">
+                                <div class="stat-bar-label">
+                                    <span><i class="fa-solid fa-fire text-q1"></i> 第I領域 (必須・危機)</span>
+                                    <span id="bar-percentage-q1" class="percentage-val">0%</span>
+                                </div>
+                                <div class="progress-bar-bg">
+                                    <div class="progress-bar-fill q1-fill" id="bar-fill-q1" style="width: 0%"></div>
+                                </div>
+                            </div>
+
+                            <!-- Q2 Stat Bar -->
+                            <div class="stat-bar-group">
+                                <div class="stat-bar-label">
+                                    <span><i class="fa-solid fa-gem text-q2"></i> 第II領域 (価値・投資) <strong class="recommend-tag">最重要投資</strong></span>
+                                    <span id="bar-percentage-q2" class="percentage-val">0%</span>
+                                </div>
+                                <div class="progress-bar-bg">
+                                    <div class="progress-bar-fill q2-fill" id="bar-fill-q2" style="width: 0%"></div>
+                                </div>
+                            </div>
+
+                            <!-- Q3 Stat Bar -->
+                            <div class="stat-bar-group">
+                                <div class="stat-bar-label">
+                                    <span><i class="fa-solid fa-bolt-lightning text-q3"></i> 第III領域 (見せかけ・錯覚)</span>
+                                    <span id="bar-percentage-q3" class="percentage-val">0%</span>
+                                </div>
+                                <div class="progress-bar-bg">
+                                    <div class="progress-bar-fill q3-fill" id="bar-fill-q3" style="width: 0%"></div>
+                                </div>
+                            </div>
+
+                            <!-- Q4 Stat Bar -->
+                            <div class="stat-bar-group">
+                                <div class="stat-bar-label">
+                                    <span><i class="fa-solid fa-trash-can text-q4"></i> 第IV領域 (無駄・過剰)</span>
+                                    <span id="bar-percentage-q4" class="percentage-val">0%</span>
+                                </div>
+                                <div class="progress-bar-bg">
+                                    <div class="progress-bar-fill q4-fill" id="bar-fill-q4" style="width: 0%"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="analytics-tips">
+                            <div class="tip-box">
+                                <i class="fa-solid fa-lightbulb text-warning"></i>
+                                <div>
+                                    <strong>データ保護のヒント:</strong> 当アプリは4重のバックアップ保護（LocalStorage、SessionStorage、自動履歴記録、手動JSON保存）を行っています。いつでも「データ復元」ボタンから過去の状態を取り戻せます。
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- ==========================================================================
+         TASK WIZARD MODAL (Separated Header to NEVER overlap with close button)
+         ========================================================================== -->
+    <div id="modal-task" class="modal-overlay">
+        <div class="modal-card modal-wizard">
+            <!-- Modal Top Bar (Close Button Isolated) -->
+            <div class="modal-top-bar">
+                <span class="modal-top-title"><i class="fa-solid fa-pen-to-square"></i> タスクとPDCA戦略の編集</span>
+                <button class="btn-close" id="btn-close-modal" title="閉じる"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <!-- Dedicated Step Navigation Bar -->
+            <div class="wizard-steps-bar">
+                <div class="wizard-step-tab active" id="tab-step-1">
+                    <span class="step-num">1</span>
+                    <span class="step-name">基本情報・座標</span>
+                </div>
+                <i class="fa-solid fa-chevron-right step-divider"></i>
+                <div class="wizard-step-tab" id="tab-step-2">
+                    <span class="step-num">2</span>
+                    <span class="step-name">成功戦略の強制入力 (Plan)</span>
+                </div>
+            </div>
+
+            <form id="task-form">
+                <input type="hidden" id="task-id">
+                
+                <!-- WIZARD STEP 1: Basic & Coordinates -->
+                <div id="wizard-step-1" class="wizard-pane active">
+                    <div class="form-group">
+                        <label for="task-title">タスク名 <span class="required">*</span></label>
+                        <input type="text" id="task-title" required placeholder="例: Q3戦略企画書の最終作成、資格試験過去問1時間 など">
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="task-category">カテゴリー</label>
+                            <select id="task-category">
+                                <option value="仕事">💼 仕事</option>
+                                <option value="自己投資・学習">📚 自己投資・学習</option>
+                                <option value="健康・生活">🏃 健康・生活</option>
+                                <option value="人間関係">🤝 人間関係</option>
+                                <option value="その他">📌 その他</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="task-deadline">締め切り日時 (任意)</label>
+                            <input type="datetime-local" id="task-deadline">
+                        </div>
+                    </div>
+
+                    <!-- Interactive Matrix Sliders with Live Preview -->
+                    <div class="sliders-section">
+                        <div class="sliders-header">
+                            <h4>座標スライダー（緊急度 ＆ 重要度）</h4>
+                            <div id="live-quadrant-badge" class="quadrant-live-badge q1">第I領域 (緊急＆重要)</div>
+                        </div>
+
+                        <!-- Urgency Slider -->
+                        <div class="slider-group">
+                            <div class="slider-label-row">
+                                <span>🔥 緊急度 (Urgency)</span>
+                                <span id="urgency-val-display" class="slider-val">75%</span>
+                            </div>
+                            <input type="range" id="task-urgency" min="0" max="100" value="75" class="custom-slider urgency-slider">
+                            <div class="slider-hints">
+                                <span>0% (いつでもOK)</span>
+                                <span>50%</span>
+                                <span>100% (今すぐ！)</span>
+                            </div>
+                        </div>
+
+                        <!-- Importance Slider -->
+                        <div class="slider-group">
+                            <div class="slider-label-row">
+                                <span>💎 重要度 (Importance)</span>
+                                <span id="importance-val-display" class="slider-val">80%</span>
+                            </div>
+                            <input type="range" id="task-importance" min="0" max="100" value="80" class="custom-slider importance-slider">
+                            <div class="slider-hints">
+                                <span>0% (影響ナシ)</span>
+                                <span>50%</span>
+                                <span>100% (極めて重要)</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="task-notes">詳細メモ / 背景 (任意)</label>
+                        <textarea id="task-notes" rows="2" placeholder="タスクの詳しい背景など..."></textarea>
+                    </div>
+
+                    <div class="modal-actions">
+                        <button type="button" class="btn btn-secondary" id="btn-cancel-modal">キャンセル</button>
+                        <button type="button" class="btn btn-primary glow-btn" id="btn-go-step-2">
+                            次へ：戦略仮説を考える (必須) <i class="fa-solid fa-arrow-right"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- WIZARD STEP 2: FORCED STRATEGY & HYPOTHESIS INPUT (Plan) -->
+                <div id="wizard-step-2" class="wizard-pane">
+                    <div class="forced-pdca-banner">
+                        <i class="fa-solid fa-lock text-q2"></i>
+                        <div>
+                            <strong>PDCAサイクル強制エンゲージメント：</strong><br>
+                            「どうすればうまくいくか？」の戦略仮説を入力しないとタスク登録・完了ができません。ここで1分考えることで、実行速度と成果が劇的に変わります！
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="pdca-strategy" class="label-highlight">
+                            <i class="fa-solid fa-lightbulb text-q2"></i> ① 成功仮説・戦略（どう工夫したら一番うまく・速くいくか？） <span class="required">* (必須)</span>
+                        </label>
+                        <textarea id="pdca-strategy" rows="3" required placeholder="例: ゼロから作らず前回の資料をテンプレートにする、集中するため14時～15時は通知を全部オフにして一気に書き上げる など"></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="pdca-obstacle">
+                            <i class="fa-solid fa-shield-halved text-q3"></i> ② 予想される障害・リスクと対策 <span class="required">* (必須)</span>
+                        </label>
+                        <textarea id="pdca-obstacle" rows="2" required placeholder="例: 途中で急ぎの電話や別件が入りそう ➡ 『ただいま集中時間』ステータスにしてチャット返信を16時に回す など"></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="pdca-goal">
+                            <i class="fa-solid fa-flag-checkered text-q1"></i> ③ ゴール・完了の定義（どこまでできたら100点合格か？） <span class="required">* (必須)</span>
+                        </label>
+                        <input type="text" id="pdca-goal" required placeholder="例: 全5ページ完成し、数字のダブルチェックを終えてメール送信完了した状態">
+                    </div>
+
+                    <div class="modal-actions">
+                        <button type="button" class="btn btn-secondary" id="btn-back-step-1">
+                            <i class="fa-solid fa-arrow-left"></i> 基本情報に戻る
+                        </button>
+                        <button type="submit" class="btn btn-success glow-btn" id="btn-save-task">
+                            <i class="fa-solid fa-check-double"></i> 戦略を確定してタスクを確実に保存！
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ==========================================================================
+         BACKUP & RESTORE CENTER MODAL (NEW: Absolute Data Safety)
+         ========================================================================== -->
+    <div id="modal-backup" class="modal-overlay">
+        <div class="modal-card backup-card">
+            <div class="modal-top-bar">
+                <span class="modal-top-title"><i class="fa-solid fa-shield-halved text-q2"></i> データバックアップ＆復元センター</span>
+                <button class="btn-close" id="btn-close-backup" title="閉じる"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="backup-intro">
+                <p>当アプリはタスクを保存・更新するたびに自動で **5重のバックアップ**（IndexedDB無制限保護、メイン保存、予備保存、セッション保存、直近10回の履歴スナップショット）を作成しています。ウェブを閉じてもデータが失われることは絶対にありません！</p>
+                <div class="direct-sync-guide-box">
+                    <strong>⚡ おすすめの最強保存：PCフォルダ内の tasks_data.json と永続直接同期！</strong>
+                    <p>下の「📂 PCファイルと直接リンク」を押して、このアプリと同じフォルダ（<code>TimeMatrixTask</code>）にある <code>tasks_data.json</code> を選ぶと、<strong>以降はタスクを追加・変更するたびにパソコンのファイルへと直接上書き・即時保存されます！</strong>（ダウンロードフォルダに別ファイルが溜まる面倒がなくなります）<br>
+                    ★ <strong>【新機能】ウェブを閉じても接続状態は自動記憶されます！</strong> 次回ページを開いた時や操作時にワンクリック確認ですぐに同期が再開します。</p>
+                </div>
+            </div>
+
+            <div class="backup-quick-actions">
+                <button id="btn-backup-link-local" class="btn btn-secondary file-link-btn"><i class="fa-solid fa-folder-tree text-q2"></i> 📂 PCファイルと直接リンク (同期開始)</button>
+                <button id="btn-backup-now" class="btn btn-primary"><i class="fa-solid fa-save"></i> 今すぐ手動スナップショット作成</button>
+                <button id="btn-export-backup-json" class="btn btn-secondary"><i class="fa-solid fa-file-arrow-down"></i> 別ファイルとしてダウンロード (.json)</button>
+            </div>
+
+            <h4 class="backup-history-title"><i class="fa-solid fa-clock-rotate-left"></i> 自動保存バックアップ履歴一覧（クリックで即座に復元）</h4>
+            <div class="backup-list-container" id="backup-list">
+                <!-- Backup items dynamically injected -->
+            </div>
+
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" id="btn-close-backup-bottom">閉じる</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==========================================================================
+         PDCA REVIEW MODAL (FORCED WHEN CHECKING "COMPLETE" / Do -> Check & Action)
+         ========================================================================== -->
+    <div id="modal-review" class="modal-overlay">
+        <div class="modal-card review-modal-card">
+            <div class="modal-top-bar">
+                <span class="modal-top-title"><i class="fa-solid fa-rotate text-q2"></i> PDCA振り返り＆完了検証 (Check & Action)</span>
+                <button class="btn-close" id="btn-close-review" title="閉じる"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="review-intro">
+                <p>素晴らしい！タスク <strong>「<span id="review-task-title"></span>」</strong> の実行お疲れ様でした。</p>
+                <p class="review-sub">PDCAサイクルを完結させるため、事前の戦略仮説と実際の検証結果を入力してください。（ここに入力すると正式に完了となります！）</p>
+            </div>
+
+            <div class="plan-summary-box">
+                <h4><i class="fa-solid fa-brain"></i> 事前に立てていた成功戦略仮説 (Plan)</h4>
+                <div id="review-original-strategy" class="original-strategy-text"></div>
+            </div>
+
+            <form id="review-form">
+                <div class="form-group">
+                    <label for="review-result" class="label-highlight">
+                        <i class="fa-solid fa-magnifying-glass-chart text-q2"></i> ① 結果の検証（仮説はどうだった？何が一番うまくいったか？） <span class="required">* (必須)</span>
+                    </label>
+                    <textarea id="review-result" rows="3" required placeholder="例: 通知オフにして集中する作戦が大正解で、予想より20分早く終わった！一方で、数字確認の段階でデータ箇所を探すのに少し時間がかかった。"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="review-action">
+                        <i class="fa-solid fa-seedling text-q1"></i> ② 次回への学び・改善アクション (Action) <span class="required">* (必須)</span>
+                    </label>
+                    <textarea id="review-action" rows="2" required placeholder="例: 次からはデータ格納先リンクをタスク作成時にあらかじめメモ欄に貼っておくことにする！このテンプレートをチームにも共有する。"></textarea>
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" id="btn-cancel-review">まだ完了しない</button>
+                    <button type="submit" class="btn btn-primary glow-btn">
+                        <i class="fa-solid fa-award"></i> 振り返りを保存して正式完了にする！
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ==========================================================================
+         TASK DETAIL / QUICK ACTION MODAL
+         ========================================================================== -->
+    <div id="modal-detail" class="modal-overlay">
+        <div class="modal-card detail-card">
+            <div class="modal-top-bar">
+                <div class="detail-header-tags">
+                    <span id="detail-quadrant-badge" class="q-badge"></span>
+                    <span id="detail-category-badge" class="cat-badge"></span>
+                    <span id="detail-pdca-status-badge" class="pdca-status-badge"></span>
+                </div>
+                <button class="btn-close" id="btn-close-detail" title="閉じる"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="detail-content">
+                <h2 id="detail-title">タスクタイトル</h2>
+                
+                <div class="detail-metrics">
+                    <div class="metric-box">
+                        <span class="metric-label">緊急度</span>
+                        <div class="metric-bar-wrap">
+                            <div id="detail-urgency-bar" class="metric-bar urgency-bar"></div>
+                        </div>
+                        <span id="detail-urgency-text" class="metric-num">75%</span>
+                    </div>
+                    <div class="metric-box">
+                        <span class="metric-label">重要度</span>
+                        <div class="metric-bar-wrap">
+                            <div id="detail-importance-bar" class="metric-bar importance-bar"></div>
+                        </div>
+                        <span id="detail-importance-text" class="metric-num">80%</span>
+                    </div>
+                </div>
+
+                <div class="detail-info-row" id="detail-deadline-row">
+                    <i class="fa-regular fa-clock"></i> 締め切り: <span id="detail-deadline-text"></span>
+                </div>
+
+                <!-- PDCA Strategy (Plan) Area -->
+                <div class="pdca-detail-section plan-section">
+                    <h3><i class="fa-solid fa-brain text-q2"></i> 事前・戦略成功仮説 (Plan)</h3>
+                    <div class="pdca-detail-item">
+                        <strong>🎯 成功戦略・工夫:</strong>
+                        <p id="detail-pdca-strategy">未設定</p>
+                    </div>
+                    <div class="pdca-detail-item">
+                        <strong>🛡️ 障害予測と対策:</strong>
+                        <p id="detail-pdca-obstacle">未設定</p>
+                    </div>
+                    <div class="pdca-detail-item">
+                        <strong>🏁 ゴール・完了定義:</strong>
+                        <p id="detail-pdca-goal">未設定</p>
+                    </div>
+                </div>
+
+                <!-- PDCA Review (Check & Action) Area - shown when completed -->
+                <div id="pdca-review-display-area" class="pdca-detail-section review-section hidden">
+                    <h3><i class="fa-solid fa-award text-gold"></i> PDCA振り返り＆検証結果 (Check & Action)</h3>
+                    <div class="pdca-detail-item">
+                        <strong>🔍 結果検証:</strong>
+                        <p id="detail-review-result">未検証</p>
+                    </div>
+                    <div class="pdca-detail-item">
+                        <strong>💡 次回への改善アクション (学び):</strong>
+                        <p id="detail-review-action">未設定</p>
+                    </div>
+                </div>
+
+                <div class="detail-notes-box">
+                    <h4><i class="fa-regular fa-file-lines"></i> 一般詳細メモ</h4>
+                    <p id="detail-notes-text">メモはありません。</p>
+                </div>
+            </div>
+            <div class="modal-actions detail-actions">
+                <button id="btn-toggle-complete" class="btn btn-success"><i class="fa-solid fa-check"></i> 完了にする</button>
+                <button id="btn-edit-from-detail" class="btn btn-secondary"><i class="fa-solid fa-pen"></i> 編集</button>
+                <button id="btn-delete-task" class="btn btn-danger"><i class="fa-solid fa-trash"></i> 削除</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- NOTIFICATION TOAST -->
+    <div id="toast" class="toast hidden">
+        <i class="fa-solid fa-circle-check toast-icon"></i>
+        <span id="toast-message">メッセージ</span>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

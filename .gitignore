@@ -1,0 +1,10 @@
+# Personal data
+tasks_data.json
+backup.json
+
+# OS/Editor settings
+.DS_Store
+Thumbs.db
+.vscode/
+node_modules/
+.env
