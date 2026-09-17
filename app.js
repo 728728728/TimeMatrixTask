@@ -10,6 +10,8 @@ const DAYS_KEY = 'eisenhower_matrix_days_v1';
 
 // 日付の切り替わり時刻（深夜0〜4時の振り返りは「前の日」として扱う）
 const DAY_START_HOUR = 4;
+// この時刻以降は「夜の振り返り」を優先表示（16:30の確認に合わせる）
+const EVENING_START_HOUR = 16;
 
 // 領域をワンタップで選んだときの座標
 const QUADRANT_PRESETS = {
@@ -878,7 +880,7 @@ function countDoneOn(key) {
 
 function getPhase(rec) {
     const h = new Date().getHours();
-    const isEvening = h >= 17 || h < DAY_START_HOUR;
+    const isEvening = h >= EVENING_START_HOUR || h < DAY_START_HOUR;
     if (isEvening) return rec.eveningAt ? 'done' : 'evening';
     return rec.morningAt ? 'day' : 'morning';
 }
