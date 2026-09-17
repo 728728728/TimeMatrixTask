@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Eisenhower Matrix Hub | PDCA戦略＆絶対保存タスク管理</title>
+    <title>Matrix Hub | 朝と夜に回すタスク管理</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <!-- Google Fonts for Modern Typography -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -31,7 +31,7 @@
                     </div>
                     <div>
                         <h1 class="brand-title">Matrix<span>Hub</span> <small class="pdca-tag">PDCA Engine</small></h1>
-                        <p class="brand-subtitle">戦略仮説＆振り返り強制機能・絶対保存データ保護</p>
+                        <p class="brand-subtitle">朝に決めて、夜に振り返る。毎日のやることをマトリックスで整理</p>
                     </div>
                 </div>
 
@@ -58,7 +58,7 @@
                     </div>
 
                     <button id="btn-add-task" class="btn btn-primary glow-btn add-task-btn">
-                        <i class="fa-solid fa-plus"></i> 新規タスク追加
+                        <i class="fa-solid fa-plus"></i> やることを追加
                     </button>
 
                     <button id="btn-open-backup" class="btn btn-secondary backup-btn" title="バックアップ履歴と復元">
@@ -113,22 +113,25 @@
         <!-- Navigation Tabs -->
         <nav class="app-nav">
             <div class="nav-tabs-group">
-                <button class="nav-tab active" data-view="matrix">
-                    <i class="fa-solid fa-chart-line"></i> 2軸マトリックス・グラフ
+                <button class="nav-tab active" data-view="today">
+                    <i class="fa-solid fa-sun"></i> 今日 <span class="nav-count hidden" id="nav-inbox-count" title="未仕分けのやること">0</span>
+                </button>
+                <button class="nav-tab" data-view="matrix">
+                    <i class="fa-solid fa-chart-line"></i> マトリックス
                 </button>
                 <button class="nav-tab" data-view="board">
-                    <i class="fa-solid fa-table-columns"></i> 4象限カンバン・ボード
+                    <i class="fa-solid fa-table-columns"></i> カンバン
                 </button>
                 <button class="nav-tab" data-view="analytics">
-                    <i class="fa-solid fa-chart-pie"></i> アナリティクス ＆ AIコーチング
+                    <i class="fa-solid fa-chart-pie"></i> 分析
                 </button>
             </div>
 
             <!-- Search & Filter Bar -->
-            <div class="nav-filters">
+            <div class="nav-filters hidden" id="nav-filters">
                 <div class="search-box">
                     <i class="fa-solid fa-magnifying-glass"></i>
-                    <input type="text" id="search-input" placeholder="タスクや仮説を検索...">
+                    <input type="text" id="search-input" placeholder="タスクやメモを検索...">
                 </div>
                 <select id="filter-category" class="filter-select">
                     <option value="all">全カテゴリー</option>
@@ -148,12 +151,120 @@
 
         <!-- Main Content Area -->
         <main class="main-content">
+            <!-- VIEW 0: 今日（朝の確認・夜の振り返り） -->
+            <section id="view-today" class="view-panel active">
+                <div class="today-hero">
+                    <div>
+                        <p class="today-date" id="today-date-label"></p>
+                        <h2 class="today-greeting" id="today-greeting"></h2>
+                    </div>
+                    <div class="routine-status">
+                        <span class="routine-pill" id="pill-morning"><i class="fa-solid fa-sun"></i> 朝の確認</span>
+                        <span class="routine-pill" id="pill-evening"><i class="fa-solid fa-moon"></i> 夜の振り返り</span>
+                        <span class="streak-pill" id="pill-streak"><i class="fa-solid fa-fire-flame-curved"></i> <span id="streak-count">0</span>日連続</span>
+                    </div>
+                </div>
+
+                <!-- クイック追加 -->
+                <form class="quick-add" id="quick-add-form" autocomplete="off">
+                    <div class="quick-add-row">
+                        <textarea id="quick-add-input" rows="1" placeholder="やることを入力 → Enter" title="複数行を貼り付けると、1行ずつ一括で追加されます"></textarea>
+                        <button type="submit" class="btn btn-primary quick-add-btn"><i class="fa-solid fa-plus"></i> 追加</button>
+                    </div>
+                    <div class="quick-add-options">
+                        <div class="q-picker" id="quick-add-quadrant">
+                            <button type="button" data-q="" class="active">あとで仕分け</button>
+                            <button type="button" data-q="q1" class="q1">I 緊急・重要</button>
+                            <button type="button" data-q="q2" class="q2">II 重要</button>
+                            <button type="button" data-q="q3" class="q3">III 緊急</button>
+                            <button type="button" data-q="q4" class="q4">IV その他</button>
+                        </div>
+                        <label class="check-chip"><input type="checkbox" id="quick-add-today"> <span><i class="fa-solid fa-sun"></i> 今日やる</span></label>
+                        <span class="quick-add-hint">複数行を貼り付けると一括で追加</span>
+                    </div>
+                </form>
+
+                <div class="today-grid" id="today-grid">
+                    <div class="today-col">
+                        <!-- 朝の確認 -->
+                        <div class="today-card routine-card morning" id="card-morning">
+                            <div class="today-card-head">
+                                <h3><i class="fa-solid fa-sun"></i> 朝の確認</h3>
+                                <button type="button" class="btn btn-sm btn-secondary hidden" id="btn-morning-reopen">もう一度見る</button>
+                            </div>
+                            <p class="routine-done-note hidden" id="morning-done-note"></p>
+                            <div class="routine-body" id="morning-body">
+                                <div class="routine-step">
+                                    <h4><span class="step-badge">1</span> やることを仕分ける <span class="step-count" id="inbox-count">0</span></h4>
+                                    <ul class="item-list" id="inbox-list"></ul>
+                                </div>
+                                <div class="routine-step">
+                                    <h4><span class="step-badge">2</span> 今日やることを選ぶ</h4>
+                                    <p class="step-hint">持ち越し・締め切り → 第I → 第IIの順に並んでいます。第IIを1つ入れるのがコツ。</p>
+                                    <ul class="item-list" id="candidate-list"></ul>
+                                    <button type="button" class="link-btn hidden" id="btn-candidate-more"></button>
+                                </div>
+                                <div class="routine-step">
+                                    <h4><span class="step-badge">3</span> 今日いちばん大事なこと</h4>
+                                    <input type="text" id="focus-input" placeholder="例: 企画書の数字を確定させる">
+                                </div>
+                                <button type="button" class="btn btn-primary glow-btn routine-done-btn" id="btn-morning-done">
+                                    <i class="fa-solid fa-check"></i> 朝の確認を完了
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="today-col">
+                        <!-- 今日やること -->
+                        <div class="today-card" id="card-today-list">
+                            <div class="today-card-head">
+                                <h3><i class="fa-solid fa-list-check"></i> 今日やること</h3>
+                                <span class="today-progress-text" id="today-progress-text">0 / 0</span>
+                            </div>
+                            <div class="today-progress"><div class="today-progress-fill" id="today-progress-fill"></div></div>
+                            <div class="focus-display hidden" id="focus-display"></div>
+                            <ul class="item-list" id="today-list"></ul>
+                        </div>
+
+                        <!-- 夜の振り返り -->
+                        <div class="today-card routine-card evening" id="card-evening">
+                            <div class="today-card-head">
+                                <h3><i class="fa-solid fa-moon"></i> 夜の振り返り</h3>
+                                <button type="button" class="btn btn-sm btn-secondary hidden" id="btn-evening-reopen">もう一度見る</button>
+                            </div>
+                            <p class="routine-done-note hidden" id="evening-done-note"></p>
+                            <div class="routine-body" id="evening-body">
+                                <p class="evening-summary" id="evening-summary"></p>
+                                <div class="routine-step" id="evening-left-step">
+                                    <h4><span class="step-badge">1</span> 残ったものをどうする？</h4>
+                                    <ul class="item-list" id="evening-left-list"></ul>
+                                    <button type="button" class="link-btn" id="btn-carry-all"><i class="fa-solid fa-share"></i> 残りを全部明日へ</button>
+                                </div>
+                                <div class="routine-step">
+                                    <h4><span class="step-badge" id="evening-reflect-num">2</span> 一言ふりかえり（任意）</h4>
+                                    <textarea id="reflection-input" rows="2" placeholder="うまくいったこと / 明日変えること"></textarea>
+                                </div>
+                                <button type="button" class="btn btn-primary glow-btn routine-done-btn" id="btn-evening-done">
+                                    <i class="fa-solid fa-moon"></i> 夜の振り返りを完了
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <details class="today-card log-card">
+                    <summary><i class="fa-solid fa-book"></i> これまでの記録</summary>
+                    <ul class="day-log-list" id="day-log-list"></ul>
+                </details>
+            </section>
+
             <!-- VIEW 1: 2軸マトリックス・グラフ（散布図＆ドラッグ＆ドロップ） -->
-            <section id="view-matrix" class="view-panel active">
+            <section id="view-matrix" class="view-panel">
                 <div class="matrix-graph-header">
                     <div class="matrix-guide">
                         <i class="fa-solid fa-hand-pointer"></i>
-                        <span>タスクを<strong>ドラッグ＆ドロップ</strong>して緊急度と重要度を調整！端っこ(0%/100%)でも文字がはみ出ない<strong>安全領域設計</strong>。</span>
+                        <span>タスクを<strong>ドラッグ</strong>して緊急度と重要度を調整（スマホは長押しせずそのまま動かせます）。未仕分けのものは「今日」タブで仕分けます。</span>
                     </div>
                     <div class="matrix-legend">
                         <span class="legend-item"><span class="dot dot-q1"></span> 第I: 緊急＆重要</span>
@@ -369,144 +480,103 @@
     </div>
 
     <!-- ==========================================================================
-         TASK WIZARD MODAL (Separated Header to NEVER overlap with close button)
+         TASK MODAL (シンプル1画面：名前と領域だけで保存できる)
          ========================================================================== -->
     <div id="modal-task" class="modal-overlay">
         <div class="modal-card modal-wizard">
-            <!-- Modal Top Bar (Close Button Isolated) -->
             <div class="modal-top-bar">
-                <span class="modal-top-title"><i class="fa-solid fa-pen-to-square"></i> タスクとPDCA戦略の編集</span>
+                <span class="modal-top-title" id="task-modal-title"><i class="fa-solid fa-pen-to-square"></i> やることを編集</span>
                 <button class="btn-close" id="btn-close-modal" title="閉じる"><i class="fa-solid fa-xmark"></i></button>
             </div>
 
-            <!-- Dedicated Step Navigation Bar -->
-            <div class="wizard-steps-bar">
-                <div class="wizard-step-tab active" id="tab-step-1">
-                    <span class="step-num">1</span>
-                    <span class="step-name">基本情報・座標</span>
-                </div>
-                <i class="fa-solid fa-chevron-right step-divider"></i>
-                <div class="wizard-step-tab" id="tab-step-2">
-                    <span class="step-num">2</span>
-                    <span class="step-name">成功戦略の強制入力 (Plan)</span>
-                </div>
-            </div>
-
-            <form id="task-form">
+            <form id="task-form" autocomplete="off">
                 <input type="hidden" id="task-id">
-                
-                <!-- WIZARD STEP 1: Basic & Coordinates -->
-                <div id="wizard-step-1" class="wizard-pane active">
+
+                <div class="form-group">
+                    <label for="task-title">やること <span class="required">*</span></label>
+                    <input type="text" id="task-title" required placeholder="例: 企画書の数字を確認する">
+                </div>
+
+                <div class="form-group">
+                    <label>どの領域？</label>
+                    <div class="q-picker q-picker-lg" id="task-quadrant-picker">
+                        <button type="button" data-q="q1" class="q1"><strong>I</strong> 緊急・重要</button>
+                        <button type="button" data-q="q2" class="q2"><strong>II</strong> 重要・急がない</button>
+                        <button type="button" data-q="q3" class="q3"><strong>III</strong> 緊急・重要でない</button>
+                        <button type="button" data-q="q4" class="q4"><strong>IV</strong> どちらでもない</button>
+                        <button type="button" data-q="" class="q-later">あとで仕分け</button>
+                    </div>
+                </div>
+
+                <label class="check-chip check-chip-block"><input type="checkbox" id="task-today"> <span><i class="fa-solid fa-sun"></i> 今日やる</span></label>
+
+                <div class="form-row">
                     <div class="form-group">
-                        <label for="task-title">タスク名 <span class="required">*</span></label>
-                        <input type="text" id="task-title" required placeholder="例: Q3戦略企画書の最終作成、資格試験過去問1時間 など">
+                        <label for="task-category">カテゴリー</label>
+                        <select id="task-category">
+                            <option value="仕事">💼 仕事</option>
+                            <option value="自己投資・学習">📚 自己投資・学習</option>
+                            <option value="健康・生活">🏃 健康・生活</option>
+                            <option value="人間関係">🤝 人間関係</option>
+                            <option value="その他">📌 その他</option>
+                        </select>
                     </div>
-
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="task-category">カテゴリー</label>
-                            <select id="task-category">
-                                <option value="仕事">💼 仕事</option>
-                                <option value="自己投資・学習">📚 自己投資・学習</option>
-                                <option value="健康・生活">🏃 健康・生活</option>
-                                <option value="人間関係">🤝 人間関係</option>
-                                <option value="その他">📌 その他</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="task-deadline">締め切り日時 (任意)</label>
-                            <input type="datetime-local" id="task-deadline">
-                        </div>
+                    <div class="form-group">
+                        <label for="task-deadline">締め切り (任意)</label>
+                        <input type="datetime-local" id="task-deadline">
                     </div>
+                </div>
 
-                    <!-- Interactive Matrix Sliders with Live Preview -->
+                <div class="form-group">
+                    <label for="task-notes">メモ (任意)</label>
+                    <textarea id="task-notes" rows="2" placeholder="背景やリンクなど"></textarea>
+                </div>
+
+                <details class="form-details" id="details-sliders">
+                    <summary>細かい位置調整（緊急度・重要度）</summary>
                     <div class="sliders-section">
                         <div class="sliders-header">
-                            <h4>座標スライダー（緊急度 ＆ 重要度）</h4>
-                            <div id="live-quadrant-badge" class="quadrant-live-badge q1">第I領域 (緊急＆重要)</div>
+                            <h4>座標スライダー</h4>
+                            <div id="live-quadrant-badge" class="quadrant-live-badge q1">第I領域</div>
                         </div>
-
-                        <!-- Urgency Slider -->
                         <div class="slider-group">
                             <div class="slider-label-row">
-                                <span>🔥 緊急度 (Urgency)</span>
+                                <span>🔥 緊急度</span>
                                 <span id="urgency-val-display" class="slider-val">75%</span>
                             </div>
                             <input type="range" id="task-urgency" min="0" max="100" value="75" class="custom-slider urgency-slider">
-                            <div class="slider-hints">
-                                <span>0% (いつでもOK)</span>
-                                <span>50%</span>
-                                <span>100% (今すぐ！)</span>
-                            </div>
                         </div>
-
-                        <!-- Importance Slider -->
                         <div class="slider-group">
                             <div class="slider-label-row">
-                                <span>💎 重要度 (Importance)</span>
+                                <span>💎 重要度</span>
                                 <span id="importance-val-display" class="slider-val">80%</span>
                             </div>
                             <input type="range" id="task-importance" min="0" max="100" value="80" class="custom-slider importance-slider">
-                            <div class="slider-hints">
-                                <span>0% (影響ナシ)</span>
-                                <span>50%</span>
-                                <span>100% (極めて重要)</span>
-                            </div>
                         </div>
                     </div>
+                </details>
 
+                <details class="form-details" id="details-pdca">
+                    <summary>作戦メモ（任意・大事なタスク向け）</summary>
                     <div class="form-group">
-                        <label for="task-notes">詳細メモ / 背景 (任意)</label>
-                        <textarea id="task-notes" rows="2" placeholder="タスクの詳しい背景など..."></textarea>
+                        <label for="pdca-strategy"><i class="fa-solid fa-lightbulb text-q2"></i> どうやればうまくいく？</label>
+                        <textarea id="pdca-strategy" rows="2" placeholder="例: 前回の資料をテンプレにする"></textarea>
                     </div>
-
-                    <div class="modal-actions">
-                        <button type="button" class="btn btn-secondary" id="btn-cancel-modal">キャンセル</button>
-                        <button type="button" class="btn btn-primary glow-btn" id="btn-go-step-2">
-                            次へ：戦略仮説を考える (必須) <i class="fa-solid fa-arrow-right"></i>
-                        </button>
-                    </div>
-                </div>
-
-                <!-- WIZARD STEP 2: FORCED STRATEGY & HYPOTHESIS INPUT (Plan) -->
-                <div id="wizard-step-2" class="wizard-pane">
-                    <div class="forced-pdca-banner">
-                        <i class="fa-solid fa-lock text-q2"></i>
-                        <div>
-                            <strong>PDCAサイクル強制エンゲージメント：</strong><br>
-                            「どうすればうまくいくか？」の戦略仮説を入力しないとタスク登録・完了ができません。ここで1分考えることで、実行速度と成果が劇的に変わります！
-                        </div>
-                    </div>
-
                     <div class="form-group">
-                        <label for="pdca-strategy" class="label-highlight">
-                            <i class="fa-solid fa-lightbulb text-q2"></i> ① 成功仮説・戦略（どう工夫したら一番うまく・速くいくか？） <span class="required">* (必須)</span>
-                        </label>
-                        <textarea id="pdca-strategy" rows="3" required placeholder="例: ゼロから作らず前回の資料をテンプレートにする、集中するため14時～15時は通知を全部オフにして一気に書き上げる など"></textarea>
+                        <label for="pdca-obstacle"><i class="fa-solid fa-shield-halved text-q3"></i> 邪魔になりそうなこと・対策</label>
+                        <textarea id="pdca-obstacle" rows="2" placeholder="例: 通知 ➡ 1時間オフにする"></textarea>
                     </div>
-
                     <div class="form-group">
-                        <label for="pdca-obstacle">
-                            <i class="fa-solid fa-shield-halved text-q3"></i> ② 予想される障害・リスクと対策 <span class="required">* (必須)</span>
-                        </label>
-                        <textarea id="pdca-obstacle" rows="2" required placeholder="例: 途中で急ぎの電話や別件が入りそう ➡ 『ただいま集中時間』ステータスにしてチャット返信を16時に回す など"></textarea>
+                        <label for="pdca-goal"><i class="fa-solid fa-flag-checkered text-q1"></i> どこまでできたら完了？</label>
+                        <input type="text" id="pdca-goal" placeholder="例: 全ページ確認して送信した">
                     </div>
+                </details>
 
-                    <div class="form-group">
-                        <label for="pdca-goal">
-                            <i class="fa-solid fa-flag-checkered text-q1"></i> ③ ゴール・完了の定義（どこまでできたら100点合格か？） <span class="required">* (必須)</span>
-                        </label>
-                        <input type="text" id="pdca-goal" required placeholder="例: 全5ページ完成し、数字のダブルチェックを終えてメール送信完了した状態">
-                    </div>
-
-                    <div class="modal-actions">
-                        <button type="button" class="btn btn-secondary" id="btn-back-step-1">
-                            <i class="fa-solid fa-arrow-left"></i> 基本情報に戻る
-                        </button>
-                        <button type="submit" class="btn btn-success glow-btn" id="btn-save-task">
-                            <i class="fa-solid fa-check-double"></i> 戦略を確定してタスクを確実に保存！
-                        </button>
-                    </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" id="btn-cancel-modal">キャンセル</button>
+                    <button type="submit" class="btn btn-primary glow-btn" id="btn-save-task">
+                        <i class="fa-solid fa-check"></i> 保存
+                    </button>
                 </div>
             </form>
         </div>
@@ -553,38 +623,38 @@
     <div id="modal-review" class="modal-overlay">
         <div class="modal-card review-modal-card">
             <div class="modal-top-bar">
-                <span class="modal-top-title"><i class="fa-solid fa-rotate text-q2"></i> PDCA振り返り＆完了検証 (Check & Action)</span>
+                <span class="modal-top-title"><i class="fa-solid fa-rotate text-q2"></i> ふりかえりを書く（任意）</span>
                 <button class="btn-close" id="btn-close-review" title="閉じる"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="review-intro">
-                <p>素晴らしい！タスク <strong>「<span id="review-task-title"></span>」</strong> の実行お疲れ様でした。</p>
-                <p class="review-sub">PDCAサイクルを完結させるため、事前の戦略仮説と実際の検証結果を入力してください。（ここに入力すると正式に完了となります！）</p>
+                <p>「<strong><span id="review-task-title"></span></strong>」お疲れさまでした。</p>
+                <p class="review-sub">書きたいときだけでOK。空欄のままでも保存できます。</p>
             </div>
 
-            <div class="plan-summary-box">
-                <h4><i class="fa-solid fa-brain"></i> 事前に立てていた成功戦略仮説 (Plan)</h4>
+            <div class="plan-summary-box" id="review-plan-box">
+                <h4><i class="fa-solid fa-brain"></i> 事前に立てていた作戦</h4>
                 <div id="review-original-strategy" class="original-strategy-text"></div>
             </div>
 
             <form id="review-form">
                 <div class="form-group">
                     <label for="review-result" class="label-highlight">
-                        <i class="fa-solid fa-magnifying-glass-chart text-q2"></i> ① 結果の検証（仮説はどうだった？何が一番うまくいったか？） <span class="required">* (必須)</span>
+                        <i class="fa-solid fa-magnifying-glass-chart text-q2"></i> どうだった？
                     </label>
-                    <textarea id="review-result" rows="3" required placeholder="例: 通知オフにして集中する作戦が大正解で、予想より20分早く終わった！一方で、数字確認の段階でデータ箇所を探すのに少し時間がかかった。"></textarea>
+                    <textarea id="review-result" rows="2" placeholder="例: 通知オフで予定より20分早く終わった"></textarea>
                 </div>
 
                 <div class="form-group">
                     <label for="review-action">
-                        <i class="fa-solid fa-seedling text-q1"></i> ② 次回への学び・改善アクション (Action) <span class="required">* (必須)</span>
+                        <i class="fa-solid fa-seedling text-q1"></i> 次はどうする？
                     </label>
-                    <textarea id="review-action" rows="2" required placeholder="例: 次からはデータ格納先リンクをタスク作成時にあらかじめメモ欄に貼っておくことにする！このテンプレートをチームにも共有する。"></textarea>
+                    <textarea id="review-action" rows="2" placeholder="例: データの場所を最初にメモしておく"></textarea>
                 </div>
 
                 <div class="modal-actions">
-                    <button type="button" class="btn btn-secondary" id="btn-cancel-review">まだ完了しない</button>
+                    <button type="button" class="btn btn-secondary" id="btn-cancel-review">閉じる</button>
                     <button type="submit" class="btn btn-primary glow-btn">
-                        <i class="fa-solid fa-award"></i> 振り返りを保存して正式完了にする！
+                        <i class="fa-solid fa-award"></i> 保存して完了にする
                     </button>
                 </div>
             </form>
@@ -629,8 +699,8 @@
                 </div>
 
                 <!-- PDCA Strategy (Plan) Area -->
-                <div class="pdca-detail-section plan-section">
-                    <h3><i class="fa-solid fa-brain text-q2"></i> 事前・戦略成功仮説 (Plan)</h3>
+                <div class="pdca-detail-section plan-section" id="pdca-plan-display-area">
+                    <h3><i class="fa-solid fa-brain text-q2"></i> 作戦メモ</h3>
                     <div class="pdca-detail-item">
                         <strong>🎯 成功戦略・工夫:</strong>
                         <p id="detail-pdca-strategy">未設定</p>
@@ -647,7 +717,7 @@
 
                 <!-- PDCA Review (Check & Action) Area - shown when completed -->
                 <div id="pdca-review-display-area" class="pdca-detail-section review-section hidden">
-                    <h3><i class="fa-solid fa-award text-gold"></i> PDCA振り返り＆検証結果 (Check & Action)</h3>
+                    <h3><i class="fa-solid fa-award text-gold"></i> ふりかえり</h3>
                     <div class="pdca-detail-item">
                         <strong>🔍 結果検証:</strong>
                         <p id="detail-review-result">未検証</p>
@@ -665,6 +735,8 @@
             </div>
             <div class="modal-actions detail-actions">
                 <button id="btn-toggle-complete" class="btn btn-success"><i class="fa-solid fa-check"></i> 完了にする</button>
+                <button id="btn-toggle-today" class="btn btn-secondary"><i class="fa-solid fa-sun"></i> 今日やる</button>
+                <button id="btn-write-review" class="btn btn-secondary"><i class="fa-solid fa-pen-nib"></i> ふりかえり</button>
                 <button id="btn-edit-from-detail" class="btn btn-secondary"><i class="fa-solid fa-pen"></i> 編集</button>
                 <button id="btn-delete-task" class="btn btn-danger"><i class="fa-solid fa-trash"></i> 削除</button>
             </div>

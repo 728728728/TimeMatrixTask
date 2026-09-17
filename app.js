@@ -1,11 +1,25 @@
 /* ==========================================================================
-   Eisenhower Matrix Task Hub | Absolute Data Safety & Forced PDCA Engine
+   Eisenhower Matrix Task Hub | 朝の確認・夜の振り返り ＋ 多重データ保護
    ========================================================================== */
 
 // Multi-Tier Storage Keys for Absolute Data Protection
 const STORAGE_KEY = 'eisenhower_matrix_tasks_v1';
 const BACKUP_KEY = 'eisenhower_matrix_tasks_backup_latest';
 const HISTORY_KEY = 'eisenhower_matrix_backups_list';
+const DAYS_KEY = 'eisenhower_matrix_days_v1';
+
+// 日付の切り替わり時刻（深夜0〜4時の振り返りは「前の日」として扱う）
+const DAY_START_HOUR = 4;
+
+// 領域をワンタップで選んだときの座標
+const QUADRANT_PRESETS = {
+    q1: { urgency: 75, importance: 75 },
+    q2: { urgency: 25, importance: 75 },
+    q3: { urgency: 75, importance: 25 },
+    q4: { urgency: 25, importance: 25 }
+};
+const QUADRANT_ORDER = { q1: 0, q2: 1, q3: 2, q4: 3 };
+const QUADRANT_SHORT = { q1: 'I', q2: 'II', q3: 'III', q4: 'IV' };
 
 // Sample Tasks with PDCA Strategy (Plan) and Review (Check & Action)
 const SAMPLE_TASKS = [
@@ -42,7 +56,7 @@ const SAMPLE_TASKS = [
         },
         pdcaReview: {
             result: 'リーダーと即座に連携したおかげで15分でDBの接続タイムアウトが原因と判明し、顧客からも迅速な連絡に感謝された！',
-            action: '【次回改善Action】今回判明したDBタイムアウトの検知アラートしきい値を調整し、自動でSlack通知と自動復旧スクリプトが動く仕組みを作った！'
+            action: '今回判明したDBタイムアウトの検知アラートしきい値を調整し、自動でSlack通知と自動復旧スクリプトが動く仕組みを作った！'
         },
         createdAt: Date.now() - 3600000 * 12
     },
@@ -55,11 +69,7 @@ const SAMPLE_TASKS = [
         deadline: getRelativeDate(3, 20),
         notes: '将来のキャリアアップに不可欠な知識の習得。緊急ではないが毎日少しずつコツコツ続けるのが一番重要！',
         completed: false,
-        pdcaStrategy: {
-            strategy: '夜にやろうとすると疲れてサボるので、毎朝出社前の『カフェでの30分×2セット』にスケジュールを先入れ固定する！',
-            obstacle: 'スマホを触って動画を見てしまう誘惑 ➡ カフェに入ったらスマホを鞄の底にしまい、ノートPCだけでドキュメントを開く。',
-            goal: 'データ分析の公式チュートリアル第3章のハンズオンコードをすべて動かしてGithubにコミットする。'
-        },
+        pdcaStrategy: null,
         pdcaReview: null,
         createdAt: Date.now() - 3600000 * 24
     },
@@ -70,13 +80,9 @@ const SAMPLE_TASKS = [
         urgency: 35,
         importance: 82,
         deadline: getRelativeDate(5, 18),
-        notes: 'これをやっておくと来月以降の「第I領域（火消し作業）」が半減する！ぜひ優先して時間を確保。',
+        notes: 'これをやっておくと来月以降の「第I領域（火消し作業）」が半減する！',
         completed: false,
-        pdcaStrategy: {
-            strategy: '完璧なGUIアプリを作ろうとせず、まずは自分が毎日使う「ExcelからCSVに自動変換する5行のPythonコード」から作る。',
-            obstacle: '他の緊急作業に押し流されて時間が消える ➡ 毎週金曜の午前10時～11時を「第II領域・改善専用タイム」としてカレンダーブロックする。',
-            goal: '毎月の月次レポート集計時間を2時間から15分に短縮するツールが稼働すること。'
-        },
+        pdcaStrategy: null,
         pdcaReview: null,
         createdAt: Date.now() - 3600000 * 36
     },
@@ -87,34 +93,42 @@ const SAMPLE_TASKS = [
         urgency: 80,
         importance: 25,
         deadline: getRelativeDate(0, 17),
-        notes: '急かされているが、実は自分の成果には直結しない。事前にアジェンダを確認し、場合によっては権限移譲か欠席を相談する。',
+        notes: '急かされているが、実は自分の成果には直結しない。',
         completed: false,
-        pdcaStrategy: {
-            strategy: '会議にただ出席するのではなく、主催者に事前に『今回の決定事項のゴールと、私の出席が必要な議題はどこか？』をチャットで確認する。',
-            obstacle: 'なんとなく1時間拘束される ➡ 必要であれば最初の15分だけ参加して『別件の緊急対応がある』と断って退席する。',
-            goal: '自分の業務時間を無駄にせず、かつ相手にも必要なフィードバックをテキストで事前に提出した状態。'
-        },
+        pdcaStrategy: null,
         pdcaReview: null,
         createdAt: Date.now() - 3600000 * 8
+    },
+    {
+        id: 'task-6',
+        title: '部屋の片付け',
+        category: 'その他',
+        inbox: true,
+        completed: false,
+        createdAt: Date.now() - 3600000
     }
 ];
 
 function getRelativeDate(daysOffset, hours) {
     const d = new Date();
     d.setDate(d.getDate() + daysOffset);
-    d.setHours(hours, 0, 0, 0);
-    return d.toISOString().slice(0, 16);
+    return `${toDateKey(d)}T${String(hours).padStart(2, '0')}:00`;
 }
 
 // App State
 let tasks = [];
+let days = {}; // { 'YYYY-MM-DD': { morningAt, eveningAt, focus, reflection, planned, done } }
 let backupHistory = [];
 let activeFileHandle = null; // ローカルファイルとの直接接続ハンドル (File System Access API)
-let currentView = 'matrix';
+let currentView = 'today';
 let activeTaskId = null;
 let reviewTargetTaskId = null;
-let isDragging = false;
-let draggedTask = null;
+let modalQuadrant = 'q1';
+let quickAddQuadrant = '';
+let morningExpanded = false;
+let eveningExpanded = false;
+let showAllCandidates = false;
+let renderedDayKey = null;
 
 // DOM Elements
 const navTabs = document.querySelectorAll('.nav-tab');
@@ -129,12 +143,6 @@ const modalBackup = document.getElementById('modal-backup');
 const taskForm = document.getElementById('task-form');
 const reviewForm = document.getElementById('review-form');
 
-const btnCloseModal = document.getElementById('btn-close-modal');
-const btnCancelModal = document.getElementById('btn-cancel-modal');
-const btnCloseReview = document.getElementById('btn-close-review');
-const btnCancelReview = document.getElementById('btn-cancel-review');
-const btnCloseDetail = document.getElementById('btn-close-detail');
-
 const searchInput = document.getElementById('search-input');
 const filterCategory = document.getElementById('filter-category');
 const toggleCompleted = document.getElementById('toggle-completed');
@@ -146,67 +154,173 @@ const urgencyValDisplay = document.getElementById('urgency-val-display');
 const importanceValDisplay = document.getElementById('importance-val-display');
 const liveQuadrantBadge = document.getElementById('live-quadrant-badge');
 
-// Wizard Elements
-const wizardStep1 = document.getElementById('wizard-step-1');
-const wizardStep2 = document.getElementById('wizard-step-2');
-const tabStep1 = document.getElementById('tab-step-1');
-const tabStep2 = document.getElementById('tab-step-2');
-const btnGoStep2 = document.getElementById('btn-go-step-2');
-const btnBackStep1 = document.getElementById('btn-back-step-1');
+const quickAddInput = document.getElementById('quick-add-input');
 
 // ==========================================================================
-// Initialization & Absolute Data Safety Loading (IndexedDB + LocalStorage)
+// Initialization
 // ==========================================================================
 window.addEventListener('DOMContentLoaded', async () => {
     await loadTasksWithSafetyFallback();
     setupDirectFileSyncListeners();
     updateFileSyncUI();
     setupEventListeners();
+    setupTodayListeners();
+    setupBoardEnhancements();
     renderAll();
-    
-    // ブラウザを閉じて再起動した後も前回の接続ファイルへ自動再接続する最強エンジン起動！
+
+    // ブラウザを閉じて再起動した後も前回の接続ファイルへ自動再接続
     await initAndRestoreDirectFileSync();
 });
 
-// タスクデータの完全正規化・サニタイズ関数（どんな誤ったデータ・破損データでもバグゼロへ最適化）
+// ==========================================================================
+// IndexedDB helpers（容量無制限の保存先＆ファイルハンドルの永続化）
+// ==========================================================================
+const IDB_NAME = 'TimeMatrixTaskDB';
+const IDB_STORES = ['TasksStore', 'HandlesStore'];
+let idbPromise = null;
+
+function getDB() {
+    if (!('indexedDB' in window)) return Promise.reject(new Error('IndexedDB unavailable'));
+    if (!idbPromise) {
+        idbPromise = new Promise((resolve, reject) => {
+            const req = indexedDB.open(IDB_NAME, 1);
+            req.onupgradeneeded = () => {
+                const db = req.result;
+                IDB_STORES.forEach(name => {
+                    if (!db.objectStoreNames.contains(name)) db.createObjectStore(name);
+                });
+            };
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+        }).catch(e => { idbPromise = null; throw e; });
+    }
+    return idbPromise;
+}
+
+async function getIDBData(store, key) {
+    const db = await getDB();
+    return new Promise((resolve, reject) => {
+        const req = db.transaction(store, 'readonly').objectStore(store).get(key);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+async function setIDBData(store, key, value) {
+    const db = await getDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(store, 'readwrite');
+        tx.objectStore(store).put(value, key);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+// ==========================================================================
+// Date helpers
+// ==========================================================================
+function toDateKey(d) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function getTodayKey() {
+    const d = new Date();
+    d.setHours(d.getHours() - DAY_START_HOUR);
+    return toDateKey(d);
+}
+
+function addDaysToKey(key, n) {
+    const [y, m, d] = key.split('-').map(Number);
+    return toDateKey(new Date(y, m - 1, d + n));
+}
+
+function formatDayLabel(key) {
+    const [y, m, d] = key.split('-').map(Number);
+    const wd = ['日', '月', '火', '水', '木', '金', '土'][new Date(y, m - 1, d).getDay()];
+    return `${m}/${d}（${wd}）`;
+}
+
+function getDayRecord(key) {
+    if (!days[key]) days[key] = {};
+    return days[key];
+}
+
+// ==========================================================================
+// Data normalize / load / save
+// ==========================================================================
+function sanitizeStrategy(s) {
+    if (!s || typeof s !== 'object') return null;
+    const clean = v => {
+        const str = String(v || '').trim();
+        return str === '設定なし' ? '' : str;
+    };
+    const out = { strategy: clean(s.strategy), obstacle: clean(s.obstacle), goal: clean(s.goal) };
+    return (out.strategy || out.obstacle || out.goal) ? out : null;
+}
+
+// タスクデータの正規化（古い形式・壊れたデータも安全に読み込む）
 function sanitizeTask(t, idx = 0) {
     if (!t || typeof t !== 'object') return null;
+    const review = (t.pdcaReview && typeof t.pdcaReview === 'object') ? {
+        result: String(t.pdcaReview.result || ''),
+        action: String(t.pdcaReview.action || '')
+    } : null;
     return {
         id: t.id || `task-recovered-${Date.now()}-${idx}`,
         title: String(t.title || '無題のタスク').slice(0, 150),
-        category: t.category || '未指定',
+        category: t.category || 'その他',
         urgency: Math.max(0, Math.min(100, Number.isFinite(Number(t.urgency)) ? Number(t.urgency) : 50)),
         importance: Math.max(0, Math.min(100, Number.isFinite(Number(t.importance)) ? Number(t.importance) : 50)),
         deadline: t.deadline || null,
         notes: String(t.notes || ''),
         completed: Boolean(t.completed),
-        pdcaStrategy: (t.pdcaStrategy && typeof t.pdcaStrategy === 'object') ? {
-            strategy: String(t.pdcaStrategy.strategy || '設定なし'),
-            obstacle: String(t.pdcaStrategy.obstacle || '設定なし'),
-            goal: String(t.pdcaStrategy.goal || '設定なし')
-        } : { strategy: '設定なし', obstacle: '設定なし', goal: '設定なし' },
-        pdcaReview: (t.pdcaReview && typeof t.pdcaReview === 'object') ? {
-            result: String(t.pdcaReview.result || ''),
-            action: String(t.pdcaReview.action || '')
-        } : null,
+        completedAt: Number.isFinite(Number(t.completedAt)) && t.completedAt ? Number(t.completedAt) : null,
+        inbox: Boolean(t.inbox),
+        today: typeof t.today === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(t.today) ? t.today : null,
+        pdcaStrategy: sanitizeStrategy(t.pdcaStrategy),
+        pdcaReview: (review && (review.result || review.action)) ? review : null,
         createdAt: Number.isFinite(Number(t.createdAt)) ? Number(t.createdAt) : Date.now()
     };
+}
+
+function sanitizeDays(obj) {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return {};
+    const out = {};
+    Object.keys(obj).forEach(k => {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(k) && obj[k] && typeof obj[k] === 'object') out[k] = obj[k];
+    });
+    return out;
+}
+
+// ファイル（tasks_data.json）の中身：旧形式（配列）と新形式（オブジェクト）の両方を読める
+function parseDataPayload(parsed) {
+    if (Array.isArray(parsed)) return { tasks: parsed, days: null };
+    if (parsed && typeof parsed === 'object' && Array.isArray(parsed.tasks)) {
+        return { tasks: parsed.tasks, days: parsed.days || null };
+    }
+    return null;
+}
+
+function applyDataPayload(payload) {
+    tasks = payload.tasks.map((t, idx) => sanitizeTask(t, idx)).filter(Boolean);
+    if (payload.days) days = { ...days, ...sanitizeDays(payload.days) };
+}
+
+function buildFilePayload() {
+    return { app: 'TimeMatrixTask', version: 2, savedAt: new Date().toISOString(), tasks, days };
 }
 
 async function loadTasksWithSafetyFallback() {
     let loaded = null;
 
-    // 1. Try IndexedDB Backup Store first (Most reliable & unlimited size)
+    // 1. IndexedDB
     try {
         const idbData = await getIDBData('TasksStore', 'latest_tasks_snapshot');
-        if (idbData && Array.isArray(idbData) && idbData.length > 0) {
-            loaded = idbData;
-            console.info('Restored tasks from IndexedDB.');
-        }
+        if (idbData && Array.isArray(idbData) && idbData.length > 0) loaded = idbData;
     } catch (e) { console.warn('IndexedDB load check error:', e); }
 
-    // 2. Try Main LocalStorage
-    if (!loaded || !Array.isArray(loaded) || loaded.length === 0) {
+    // 2. Main LocalStorage
+    if (!loaded || loaded.length === 0) {
         try {
             const dataStr = localStorage.getItem(STORAGE_KEY);
             if (dataStr) loaded = JSON.parse(dataStr);
@@ -218,32 +332,36 @@ async function loadTasksWithSafetyFallback() {
         try {
             const savedBackup = localStorage.getItem(BACKUP_KEY);
             const savedSession = sessionStorage.getItem(STORAGE_KEY);
-            let candBackup = savedBackup ? JSON.parse(savedBackup) : null;
-            let candSession = savedSession ? JSON.parse(savedSession) : null;
-
-            if (candBackup && Array.isArray(candBackup) && candBackup.length > 0) {
-                loaded = candBackup;
-                console.info('Restored from LocalBackup!');
-            } else if (candSession && Array.isArray(candSession) && candSession.length > 0) {
-                loaded = candSession;
-                console.info('Restored from SessionStorage!');
-            }
+            const candBackup = savedBackup ? JSON.parse(savedBackup) : null;
+            const candSession = savedSession ? JSON.parse(savedSession) : null;
+            if (Array.isArray(candBackup) && candBackup.length > 0) loaded = candBackup;
+            else if (Array.isArray(candSession) && candSession.length > 0) loaded = candSession;
         } catch (e) { console.warn('Backup load error:', e); }
     }
 
-    // 4. Load Backup History List
+    // 4. 日々の記録
+    try {
+        const idbDays = await getIDBData('TasksStore', 'latest_days');
+        if (idbDays) days = sanitizeDays(idbDays);
+    } catch (e) {}
+    try {
+        const d = localStorage.getItem(DAYS_KEY);
+        if (d) days = { ...sanitizeDays(JSON.parse(d)), ...days };
+    } catch (e) {}
+
+    // 5. Backup History List
     try {
         const hist = localStorage.getItem(HISTORY_KEY);
         if (hist) backupHistory = JSON.parse(hist);
         if (!Array.isArray(backupHistory)) backupHistory = [];
     } catch (e) { backupHistory = []; }
 
-    // 5. Sanitize & Final Fallback to Sample if totally empty
+    // 6. Sanitize & Final Fallback to Sample if totally empty
     if (loaded && Array.isArray(loaded)) {
         tasks = loaded.map((t, idx) => sanitizeTask(t, idx)).filter(Boolean);
     } else {
         tasks = SAMPLE_TASKS.map((t, idx) => sanitizeTask(t, idx)).filter(Boolean);
-        saveTasks(true, true); // Save initial sample
+        saveTasks(true, true);
     }
 
     updateSaveIndicator();
@@ -251,17 +369,14 @@ async function loadTasksWithSafetyFallback() {
 
 function saveTasks(silent = false, skipDirectFile = false) {
     const dataStr = JSON.stringify(tasks);
+    const daysStr = JSON.stringify(days);
 
-    // 1. Main LocalStorage
     try { localStorage.setItem(STORAGE_KEY, dataStr); } catch (e) { console.error('LocalStorage error:', e); }
-
-    // 2. Latest Backup LocalStorage
     try { localStorage.setItem(BACKUP_KEY, dataStr); } catch (e) {}
-
-    // 3. SessionStorage
+    try { localStorage.setItem(DAYS_KEY, daysStr); } catch (e) {}
     try { sessionStorage.setItem(STORAGE_KEY, dataStr); } catch (e) {}
 
-    // 4. Record to Snapshot History (Keep max 10 recent snapshots if changed)
+    // Snapshot History (max 10, only when changed)
     try {
         const nowStr = new Date().toLocaleString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
         if (backupHistory.length === 0 || JSON.stringify(backupHistory[0].data) !== dataStr) {
@@ -271,15 +386,12 @@ function saveTasks(silent = false, skipDirectFile = false) {
         }
     } catch (e) {}
 
-    // 5. IndexedDB Persistent Store (無限容量＆絶対安全・ページを閉じても消滅しないストレージ)
-    try {
-        setIDBData('TasksStore', 'latest_tasks_snapshot', tasks);
-    } catch (e) {}
+    // IndexedDB
+    setIDBData('TasksStore', 'latest_tasks_snapshot', JSON.parse(dataStr)).catch(() => {});
+    setIDBData('TasksStore', 'latest_days', JSON.parse(daysStr)).catch(() => {});
 
-    // 6. Direct Local File Sync (if linked)
-    if (!skipDirectFile && activeFileHandle) {
-        saveToDirectLocalFile(true);
-    }
+    // Direct Local File Sync (if linked)
+    if (!skipDirectFile && activeFileHandle) saveToDirectLocalFile(true);
 
     updateHeaderStats();
     updateSaveIndicator();
@@ -292,7 +404,7 @@ function updateSaveIndicator() {
     const now = new Date();
     const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
     el.textContent = `保護完了 (${timeStr})`;
-    
+
     const badge = document.getElementById('save-status-indicator');
     if (badge) {
         badge.style.borderColor = '#00f5d4';
@@ -301,7 +413,7 @@ function updateSaveIndicator() {
 }
 
 // ==========================================================================
-// Quadrant Helper
+// Quadrant / task helpers
 // ==========================================================================
 function getQuadrant(urgency, importance) {
     if (urgency >= 50 && importance >= 50) return 'q1';
@@ -310,93 +422,140 @@ function getQuadrant(urgency, importance) {
     return 'q4';
 }
 
+function taskQuadrant(task) {
+    return getQuadrant(task.urgency, task.importance);
+}
+
 function getQuadrantName(q) {
     switch (q) {
-        case 'q1': return '第I領域 (必須・危機)';
-        case 'q2': return '第II領域 (価値・投資)';
-        case 'q3': return '第III領域 (見せかけ・錯覚)';
-        case 'q4': return '第IV領域 (無駄・過剰)';
+        case 'q1': return '第I領域 (緊急・重要)';
+        case 'q2': return '第II領域 (重要・急がない)';
+        case 'q3': return '第III領域 (緊急・重要でない)';
+        case 'q4': return '第IV領域 (どちらでもない)';
         default: return '';
     }
+}
+
+// 領域を割り当てる（'' は「あとで仕分け」）。すでに同じ領域なら座標はそのまま
+function setTaskQuadrant(task, q) {
+    if (!q) {
+        task.inbox = true;
+        return;
+    }
+    task.inbox = false;
+    if (taskQuadrant(task) !== q) {
+        task.urgency = QUADRANT_PRESETS[q].urgency;
+        task.importance = QUADRANT_PRESETS[q].importance;
+    }
+}
+
+function setTaskCompleted(task, done) {
+    task.completed = done;
+    task.completedAt = done ? Date.now() : null;
+    if (done) task.inbox = false;
+}
+
+function findTask(id) {
+    return tasks.find(t => t.id === id);
+}
+
+function newTaskId() {
+    return 'task-' + Date.now() + '-' + Math.floor(Math.random() * 100000);
+}
+
+function createTask(title, q, forToday) {
+    const task = sanitizeTask({
+        id: newTaskId(),
+        title,
+        category: 'その他',
+        completed: false,
+        createdAt: Date.now()
+    });
+    setTaskQuadrant(task, q);
+    if (forToday) task.today = getTodayKey();
+    return task;
+}
+
+function deadlineInfo(task) {
+    if (!task.deadline) return null;
+    const dt = new Date(task.deadline);
+    if (isNaN(dt)) return null;
+    const key = toDateKey(dt);
+    const today = getTodayKey();
+    const time = `${dt.getHours()}:${String(dt.getMinutes()).padStart(2, '0')}`;
+    if (!task.completed && dt < new Date()) return { label: `期限切れ ${dt.getMonth() + 1}/${dt.getDate()}`, warn: true, rank: 0 };
+    if (key === today) return { label: `今日 ${time}まで`, warn: true, rank: 1 };
+    if (key === addDaysToKey(today, 1)) return { label: `明日 ${time}まで`, warn: false, rank: 2 };
+    return { label: `${dt.getMonth() + 1}/${dt.getDate()}まで`, warn: false, rank: 3 };
 }
 
 // ==========================================================================
 // Event Listeners
 // ==========================================================================
+function switchView(targetView) {
+    navTabs.forEach(t => t.classList.toggle('active', t.dataset.view === targetView));
+    viewPanels.forEach(p => p.classList.toggle('active', p.id === `view-${targetView}`));
+    currentView = targetView;
+    document.getElementById('nav-filters').classList.toggle('hidden', targetView === 'today' || targetView === 'analytics');
+    renderAll();
+}
+
 function setupEventListeners() {
-    // Navigation Tabs
     navTabs.forEach(tab => {
-        tab.addEventListener('click', () => {
-            navTabs.forEach(t => t.classList.remove('active'));
-            viewPanels.forEach(p => p.classList.remove('active'));
-
-            tab.classList.add('active');
-            const targetView = tab.dataset.view;
-            document.getElementById(`view-${targetView}`).classList.add('active');
-            currentView = targetView;
-
-            renderAll();
-        });
+        tab.addEventListener('click', () => switchView(tab.dataset.view));
     });
 
-    // Add Task Button
-    btnAddTask.addEventListener('click', () => openTaskModal());
+    // 追加ボタン：今日タブのクイック入力へ
+    btnAddTask.addEventListener('click', () => {
+        if (currentView !== 'today') switchView('today');
+        quickAddInput.focus();
+        quickAddInput.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    });
 
     // Modals Close
-    btnCloseModal.addEventListener('click', closeTaskModal);
-    btnCancelModal.addEventListener('click', closeTaskModal);
-    btnCloseReview.addEventListener('click', closeReviewModal);
-    btnCancelReview.addEventListener('click', closeReviewModal);
-    btnCloseDetail.addEventListener('click', closeDetailModal);
+    document.getElementById('btn-close-modal').addEventListener('click', closeTaskModal);
+    document.getElementById('btn-cancel-modal').addEventListener('click', closeTaskModal);
+    document.getElementById('btn-close-review').addEventListener('click', closeReviewModal);
+    document.getElementById('btn-cancel-review').addEventListener('click', closeReviewModal);
+    document.getElementById('btn-close-detail').addEventListener('click', closeDetailModal);
 
     modalTask.addEventListener('click', (e) => { if (e.target === modalTask) closeTaskModal(); });
     modalReview.addEventListener('click', (e) => { if (e.target === modalReview) closeReviewModal(); });
     modalDetail.addEventListener('click', (e) => { if (e.target === modalDetail) closeDetailModal(); });
 
     // Backup Modal
-    const btnOpenBackup = document.getElementById('btn-open-backup');
-    const btnCloseBackup = document.getElementById('btn-close-backup');
-    const btnCloseBackupBottom = document.getElementById('btn-close-backup-bottom');
-    if (btnOpenBackup) btnOpenBackup.addEventListener('click', openBackupModal);
-    if (btnCloseBackup) btnCloseBackup.addEventListener('click', closeBackupModal);
-    if (btnCloseBackupBottom) btnCloseBackupBottom.addEventListener('click', closeBackupModal);
-    if (modalBackup) modalBackup.addEventListener('click', (e) => { if (e.target === modalBackup) closeBackupModal(); });
+    document.getElementById('btn-open-backup').addEventListener('click', openBackupModal);
+    document.getElementById('btn-close-backup').addEventListener('click', closeBackupModal);
+    document.getElementById('btn-close-backup-bottom').addEventListener('click', closeBackupModal);
+    modalBackup.addEventListener('click', (e) => { if (e.target === modalBackup) closeBackupModal(); });
 
     document.getElementById('btn-backup-now').addEventListener('click', () => {
         saveTasks();
         renderBackupHistory();
-        showToast('🛡️ 今時点の安全バックアップスナップショットを作成しました！');
+        showToast('🛡️ 今時点のバックアップを作成しました');
     });
     document.getElementById('btn-export-backup-json').addEventListener('click', exportJSON);
 
-    // Sliders live preview inside Modal
-    taskUrgencySlider.addEventListener('input', updateLivePreview);
-    taskImportanceSlider.addEventListener('input', updateLivePreview);
-
-    // Wizard Navigation
-    btnGoStep2.addEventListener('click', () => {
-        const titleInput = document.getElementById('task-title');
-        if (!titleInput.value.trim()) {
-            titleInput.focus();
-            showToast('まずはタスク名を入力してください！');
-            return;
-        }
-        showWizardStep(2);
+    // Task modal: quadrant picker & sliders
+    document.querySelectorAll('#task-quadrant-picker button').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const q = btn.dataset.q;
+            modalQuadrant = q;
+            if (q && getQuadrant(+taskUrgencySlider.value, +taskImportanceSlider.value) !== q) {
+                taskUrgencySlider.value = QUADRANT_PRESETS[q].urgency;
+                taskImportanceSlider.value = QUADRANT_PRESETS[q].importance;
+            }
+            updateLivePreview();
+        });
     });
-    btnBackStep1.addEventListener('click', () => showWizardStep(1));
-    tabStep1.addEventListener('click', () => showWizardStep(1));
-    tabStep2.addEventListener('click', () => {
-        if (document.getElementById('task-title').value.trim()) showWizardStep(2);
-        else showToast('まずはタスク名を入力してください！');
-    });
+    taskUrgencySlider.addEventListener('input', () => { modalQuadrant = null; updateLivePreview(); });
+    taskImportanceSlider.addEventListener('input', () => { modalQuadrant = null; updateLivePreview(); });
 
-    // Form Submit (Forced PDCA Strategy Save)
     taskForm.addEventListener('submit', (e) => {
         e.preventDefault();
         saveFormTask();
     });
 
-    // Review Form Submit (Forced Check & Action Save)
     reviewForm.addEventListener('submit', (e) => {
         e.preventDefault();
         saveReviewAndCompleteTask();
@@ -419,21 +578,22 @@ function setupEventListeners() {
     // Dropdown Actions
     document.getElementById('btn-instant-save-json').addEventListener('click', exportJSON);
     document.getElementById('btn-load-sample').addEventListener('click', () => {
-        if (confirm('現在のタスクにサンプルデータを追加・更新しますか？')) {
-            tasks = [...SAMPLE_TASKS];
+        if (confirm('現在のタスクをサンプルデータに置き換えますか？（バックアップから戻せます）')) {
+            saveTasks(true);
+            tasks = SAMPLE_TASKS.map((t, idx) => sanitizeTask(t, idx)).filter(Boolean);
             saveTasks();
             renderAll();
-            showToast('サンプルデータを投入しました！');
+            showToast('サンプルデータを投入しました');
         }
     });
 
     document.getElementById('btn-clear-all').addEventListener('click', () => {
         if (confirm('本当にすべてのタスクをクリアしますか？（バックアップセンターから復元可能です）')) {
-            saveTasks(); // 削除前にスナップショット自動記録！
+            saveTasks(); // 削除前にスナップショット記録
             tasks = [];
             saveTasks();
             renderAll();
-            showToast('タスクをクリアしました（バックアップからいつでも復元可能）');
+            showToast('タスクをクリアしました（バックアップから復元可能）');
         }
     });
 
@@ -441,63 +601,92 @@ function setupEventListeners() {
 
     // Detail modal actions
     document.getElementById('btn-toggle-complete').addEventListener('click', () => {
-        if (activeTaskId) {
-            const task = tasks.find(t => t.id === activeTaskId);
-            if (task) {
-                closeDetailModal();
-                if (task.completed) {
-                    task.completed = false;
-                    saveTasks();
-                    renderAll();
-                    showToast('タスクを未完了に戻しました');
-                } else {
-                    openReviewModal(task);
-                }
-            }
-        }
+        const task = findTask(activeTaskId);
+        if (!task) return;
+        closeDetailModal();
+        toggleComplete(task);
+    });
+
+    document.getElementById('btn-toggle-today').addEventListener('click', () => {
+        const task = findTask(activeTaskId);
+        if (!task) return;
+        const key = getTodayKey();
+        task.today = task.today === key ? null : key;
+        saveTasks();
+        renderAll();
+        openDetailModal(task);
+        showToast(task.today ? '☀ 今日やることに入れました' : '今日やることから外しました');
+    });
+
+    document.getElementById('btn-write-review').addEventListener('click', () => {
+        const task = findTask(activeTaskId);
+        if (!task) return;
+        closeDetailModal();
+        openReviewModal(task);
     });
 
     document.getElementById('btn-edit-from-detail').addEventListener('click', () => {
-        const id = activeTaskId;
+        const task = findTask(activeTaskId);
         closeDetailModal();
-        const task = tasks.find(t => t.id === id);
         if (task) openTaskModal(task);
     });
 
     document.getElementById('btn-delete-task').addEventListener('click', () => {
         if (activeTaskId && confirm('このタスクを削除してもよろしいですか？')) {
-            tasks = tasks.filter(t => t.id !== activeTaskId);
-            saveTasks();
-            renderAll();
+            deleteTask(activeTaskId);
             closeDetailModal();
-            showToast('タスクを削除しました');
         }
     });
 
-    window.addEventListener('resize', () => {
-        if (currentView === 'matrix') renderMatrixGraph();
+    // Escで閉じる / n でクイック入力へ
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            closeTaskModal(); closeReviewModal(); closeDetailModal(); closeBackupModal();
+            return;
+        }
+        const tag = (e.target.tagName || '').toLowerCase();
+        const typing = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable;
+        if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && e.key === 'n' && !document.querySelector('.modal-overlay.show')) {
+            e.preventDefault();
+            btnAddTask.click();
+        }
     });
 
-    // Before unload safety check
-    window.addEventListener('beforeunload', () => {
-        saveTasks(true);
+    // 日付が変わったら「今日」を描き直す（開きっぱなし対策）
+    const checkRollover = () => {
+        if (renderedDayKey && renderedDayKey !== getTodayKey()) {
+            morningExpanded = false;
+            eveningExpanded = false;
+            renderAll();
+        }
+    };
+    setInterval(checkRollover, 60000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) checkRollover(); });
+
+    let resizeTimeout = null;
+    window.addEventListener('resize', () => {
+        if (resizeTimeout) clearTimeout(resizeTimeout);
+        resizeTimeout = setTimeout(() => {
+            if (currentView === 'matrix') renderMatrixGraph();
+        }, 100);
     });
+
+    window.addEventListener('beforeunload', () => saveTasks(true));
 }
 
-function showWizardStep(stepNum) {
-    if (stepNum === 1) {
-        wizardStep1.classList.add('active');
-        wizardStep2.classList.remove('active');
-        tabStep1.classList.add('active');
-        tabStep2.classList.remove('active');
-    } else {
-        wizardStep1.classList.remove('active');
-        wizardStep2.classList.add('active');
-        tabStep1.classList.remove('active');
-        tabStep2.classList.add('active');
-        const stratEl = document.getElementById('pdca-strategy');
-        if (stratEl) stratEl.focus();
-    }
+function toggleComplete(task) {
+    const done = !task.completed;
+    setTaskCompleted(task, done);
+    saveTasks();
+    renderAll();
+    showToast(done ? `✅ 「${task.title.slice(0, 20)}」完了！` : '未完了に戻しました');
+}
+
+function deleteTask(id) {
+    tasks = tasks.filter(t => t.id !== id);
+    saveTasks();
+    renderAll();
+    showToast('タスクを削除しました（データ復元から戻せます）');
 }
 
 function updateLivePreview() {
@@ -509,10 +698,377 @@ function updateLivePreview() {
     const q = getQuadrant(u, i);
     liveQuadrantBadge.className = `quadrant-live-badge ${q}`;
     liveQuadrantBadge.textContent = getQuadrantName(q);
+
+    const selected = modalQuadrant === '' ? '' : q;
+    document.querySelectorAll('#task-quadrant-picker button').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.q === selected);
+    });
 }
 
 // ==========================================================================
-// Filtering Tasks
+// VIEW 0: 今日（クイック追加・朝の確認・夜の振り返り）
+// ==========================================================================
+function cleanLine(line) {
+    return line
+        .replace(/^\s*(?:[-*・•●○□■☐☑✓✔]|\[[ xX]?\]|\d+[.)．、])\s*/, '')
+        .trim();
+}
+
+function setupTodayListeners() {
+    const form = document.getElementById('quick-add-form');
+    const todayCheck = document.getElementById('quick-add-today');
+
+    const autoGrow = () => {
+        quickAddInput.style.height = 'auto';
+        quickAddInput.style.height = Math.min(quickAddInput.scrollHeight + 2, 200) + 'px';
+    };
+    quickAddInput.addEventListener('input', autoGrow);
+
+    quickAddInput.addEventListener('keydown', (e) => {
+        // 日本語変換中のEnterでは送信しない
+        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
+            e.preventDefault();
+            form.requestSubmit();
+        }
+    });
+
+    form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const lines = quickAddInput.value.split(/\r?\n/).map(cleanLine).filter(Boolean);
+        if (lines.length === 0) {
+            quickAddInput.focus();
+            return;
+        }
+        const forToday = todayCheck.checked;
+        const created = lines.map(line => createTask(line.slice(0, 150), quickAddQuadrant, forToday));
+        tasks.unshift(...created);
+        saveTasks();
+        quickAddInput.value = '';
+        autoGrow();
+        renderAll();
+        const where = quickAddQuadrant ? `第${QUADRANT_SHORT[quickAddQuadrant]}領域` : '「仕分け」';
+        showToast(`${created.length}件を${where}に追加しました${forToday ? '（今日やる）' : ''}`);
+        quickAddInput.focus();
+    });
+
+    document.querySelectorAll('#quick-add-quadrant button').forEach(btn => {
+        btn.addEventListener('click', () => {
+            quickAddQuadrant = btn.dataset.q;
+            document.querySelectorAll('#quick-add-quadrant button').forEach(b => b.classList.toggle('active', b === btn));
+            quickAddInput.focus();
+        });
+    });
+
+    // 朝の確認
+    const focusInput = document.getElementById('focus-input');
+    focusInput.addEventListener('change', () => {
+        getDayRecord(getTodayKey()).focus = focusInput.value.trim();
+        saveTasks(true);
+        renderToday();
+    });
+    focusInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) focusInput.blur();
+    });
+
+    document.getElementById('btn-morning-done').addEventListener('click', () => {
+        const key = getTodayKey();
+        const rec = getDayRecord(key);
+        rec.focus = focusInput.value.trim();
+        rec.morningAt = Date.now();
+        morningExpanded = false;
+        saveTasks();
+        renderAll();
+        const n = tasks.filter(t => t.today === key && !t.completed).length;
+        showToast(n > 0 ? `☀ 今日は${n}件。いってらっしゃい！` : '☀ 朝の確認OK（今日やることは後からでも追加できます）');
+    });
+    document.getElementById('btn-morning-reopen').addEventListener('click', () => {
+        morningExpanded = !morningExpanded;
+        renderToday();
+    });
+    document.getElementById('btn-candidate-more').addEventListener('click', () => {
+        showAllCandidates = !showAllCandidates;
+        renderToday();
+    });
+
+    // 夜の振り返り
+    const reflectionInput = document.getElementById('reflection-input');
+    reflectionInput.addEventListener('change', () => {
+        getDayRecord(getTodayKey()).reflection = reflectionInput.value.trim();
+        saveTasks(true);
+    });
+
+    document.getElementById('btn-carry-all').addEventListener('click', () => {
+        const key = getTodayKey();
+        const left = tasks.filter(t => t.today === key && !t.completed);
+        left.forEach(t => { t.today = addDaysToKey(key, 1); });
+        saveTasks();
+        renderAll();
+        showToast(`${left.length}件を明日に回しました`);
+    });
+
+    document.getElementById('btn-evening-done').addEventListener('click', () => {
+        const key = getTodayKey();
+        const rec = getDayRecord(key);
+        const planned = tasks.filter(t => t.today === key);
+        rec.reflection = reflectionInput.value.trim();
+        rec.eveningAt = Date.now();
+        rec.planned = planned.length;
+        rec.done = countDoneOn(key);
+        eveningExpanded = false;
+        saveTasks();
+        renderAll();
+        showToast('🌙 おつかれさまでした。また明日！');
+    });
+    document.getElementById('btn-evening-reopen').addEventListener('click', () => {
+        eveningExpanded = !eveningExpanded;
+        renderToday();
+    });
+
+    // 各リストのボタン（イベント委譲）
+    ['inbox-list', 'candidate-list', 'today-list', 'evening-left-list'].forEach(id => {
+        document.getElementById(id).addEventListener('click', onItemListClick);
+    });
+}
+
+function onItemListClick(e) {
+    const row = e.target.closest('.item-row');
+    if (!row) return;
+    const task = findTask(row.dataset.id);
+    if (!task) return;
+    const btn = e.target.closest('button');
+    const key = getTodayKey();
+
+    if (!btn) {
+        if (e.target.closest('.item-main')) openDetailModal(task);
+        return;
+    }
+
+    const act = btn.dataset.act;
+    if (act === 'sort') {
+        setTaskQuadrant(task, btn.dataset.q);
+        showToast(`「${task.title.slice(0, 16)}」→ 第${QUADRANT_SHORT[btn.dataset.q]}領域`);
+    } else if (act === 'today') {
+        task.today = key;
+        task.inbox = false;
+    } else if (act === 'untoday') {
+        task.today = null;
+    } else if (act === 'tomorrow') {
+        task.today = addDaysToKey(key, 1);
+        showToast('明日に回しました');
+    } else if (act === 'check') {
+        setTaskCompleted(task, !task.completed);
+        if (task.completed) showToast(`✅ 「${task.title.slice(0, 20)}」完了！`);
+    } else if (act === 'delete') {
+        if (!confirm(`「${task.title}」を削除しますか？`)) return;
+        tasks = tasks.filter(t => t.id !== task.id);
+    } else {
+        return;
+    }
+    saveTasks();
+    renderAll();
+}
+
+function countDoneOn(key) {
+    return tasks.filter(t => t.completed && t.completedAt && (() => {
+        const d = new Date(t.completedAt);
+        d.setHours(d.getHours() - DAY_START_HOUR);
+        return toDateKey(d) === key;
+    })()).length;
+}
+
+function getPhase(rec) {
+    const h = new Date().getHours();
+    const isEvening = h >= 17 || h < DAY_START_HOUR;
+    if (isEvening) return rec.eveningAt ? 'done' : 'evening';
+    return rec.morningAt ? 'day' : 'morning';
+}
+
+function computeStreak() {
+    const hasCheck = k => days[k] && (days[k].morningAt || days[k].eveningAt);
+    let key = getTodayKey();
+    if (!hasCheck(key)) key = addDaysToKey(key, -1);
+    let n = 0;
+    while (hasCheck(key)) {
+        n++;
+        key = addDaysToKey(key, -1);
+    }
+    return n;
+}
+
+function itemRowHTML(task, opts) {
+    const q = task.inbox ? '' : taskQuadrant(task);
+    const dl = deadlineInfo(task);
+    const subs = [];
+    if (opts.showQuadrant && q) subs.push(`<span>第${QUADRANT_SHORT[q]}</span>`);
+    if (opts.carry) subs.push(`<span class="carry">持ち越し</span>`);
+    if (dl && !task.completed) subs.push(`<span class="${dl.warn ? 'warn' : ''}"><i class="fa-regular fa-clock"></i> ${dl.label}</span>`);
+    return `
+        <li class="item-row ${q} ${opts.inbox ? 'inbox' : ''} ${task.completed ? 'done' : ''}" data-id="${escapeHTML(task.id)}">
+            ${opts.check ? `<button type="button" class="check-btn" data-act="check" title="${task.completed ? '未完了に戻す' : '完了にする'}"><i class="fa-solid fa-check"></i></button>` : ''}
+            <div class="item-main">
+                <span class="item-title">${escapeHTML(task.title)}</span>
+                <span class="item-sub">${subs.join('')}</span>
+            </div>
+            <div class="item-actions">${opts.actions}</div>
+        </li>`;
+}
+
+function renderToday() {
+    const key = getTodayKey();
+    renderedDayKey = key;
+    const rec = days[key] || {};
+    const phase = getPhase(rec);
+
+    // Hero
+    const [y, m, d] = key.split('-').map(Number);
+    document.getElementById('today-date-label').textContent = `${y}年 ${formatDayLabel(key)}`;
+    const todayTasks = tasks.filter(t => t.today === key);
+    const leftTasks = todayTasks.filter(t => !t.completed);
+    const greeting = {
+        morning: 'おはようございます。まずは朝の確認から',
+        day: leftTasks.length > 0 ? `今日やることは残り ${leftTasks.length} 件` : '今日の予定はすべて完了！',
+        evening: 'おつかれさまです。夜の振り返りをしましょう',
+        done: '今日もおつかれさまでした'
+    }[phase];
+    document.getElementById('today-greeting').textContent = greeting;
+    document.getElementById('pill-morning').classList.toggle('done', Boolean(rec.morningAt));
+    document.getElementById('pill-evening').classList.toggle('done', Boolean(rec.eveningAt));
+    document.getElementById('streak-count').textContent = computeStreak();
+
+    const grid = document.getElementById('today-grid');
+    grid.classList.toggle('phase-day', phase === 'day');
+    grid.classList.toggle('phase-evening', phase === 'evening' || phase === 'done');
+
+    // ---- 朝の確認 ----
+    const inbox = tasks.filter(t => t.inbox && !t.completed);
+    const inboxList = document.getElementById('inbox-list');
+    document.getElementById('inbox-count').textContent = inbox.length ? `${inbox.length}件` : '';
+    inboxList.innerHTML = inbox.length === 0
+        ? '<li class="item-empty">仕分け待ちはありません 👍</li>'
+        : inbox.map(t => itemRowHTML(t, {
+            inbox: true,
+            actions: ['q1', 'q2', 'q3', 'q4'].map(q =>
+                `<button type="button" class="mini-q ${q}" data-act="sort" data-q="${q}" title="${getQuadrantName(q)}">${QUADRANT_SHORT[q]}</button>`
+            ).join('') + `<button type="button" class="mini-btn icon" data-act="delete" title="削除"><i class="fa-solid fa-xmark"></i></button>`
+        })).join('');
+
+    const candidates = tasks
+        .filter(t => !t.completed && !t.inbox && t.today !== key && !(t.today && t.today > key))
+        .map(t => {
+            const dl = deadlineInfo(t);
+            const carry = Boolean(t.today && t.today < key);
+            const rank = carry ? 0 : (dl && dl.rank <= 1 ? 1 : 2);
+            return { t, carry, rank };
+        })
+        .sort((a, b) =>
+            a.rank - b.rank ||
+            QUADRANT_ORDER[taskQuadrant(a.t)] - QUADRANT_ORDER[taskQuadrant(b.t)] ||
+            b.t.importance - a.t.importance
+        );
+    const LIMIT = 6;
+    const shown = showAllCandidates ? candidates : candidates.slice(0, LIMIT);
+    document.getElementById('candidate-list').innerHTML = candidates.length === 0
+        ? '<li class="item-empty">候補はありません。上の入力欄から追加できます。</li>'
+        : shown.map(c => itemRowHTML(c.t, {
+            showQuadrant: true,
+            carry: c.carry,
+            actions: `<button type="button" class="mini-btn primary" data-act="today"><i class="fa-solid fa-plus"></i> 今日</button>`
+        })).join('');
+    const moreBtn = document.getElementById('btn-candidate-more');
+    moreBtn.classList.toggle('hidden', candidates.length <= LIMIT);
+    moreBtn.textContent = showAllCandidates ? '少なく表示' : `ほかの候補も見る（あと${candidates.length - LIMIT}件）`;
+
+    const focusInput = document.getElementById('focus-input');
+    if (document.activeElement !== focusInput) focusInput.value = rec.focus || '';
+
+    const morningDone = Boolean(rec.morningAt);
+    const showMorningBody = !morningDone || morningExpanded;
+    document.getElementById('morning-body').classList.toggle('hidden', !showMorningBody);
+    const mNote = document.getElementById('morning-done-note');
+    mNote.classList.toggle('hidden', showMorningBody);
+    if (morningDone) {
+        const t = new Date(rec.morningAt);
+        mNote.textContent = `✓ ${t.getHours()}:${String(t.getMinutes()).padStart(2, '0')} に完了` +
+            (inbox.length ? `\n仕分け待ちが ${inbox.length} 件あります` : '');
+    }
+    const mReopen = document.getElementById('btn-morning-reopen');
+    mReopen.classList.toggle('hidden', !morningDone);
+    mReopen.textContent = morningExpanded ? '閉じる' : 'もう一度見る';
+    document.getElementById('btn-morning-done').innerHTML = morningDone
+        ? '<i class="fa-solid fa-check"></i> 更新して閉じる'
+        : '<i class="fa-solid fa-check"></i> 朝の確認を完了';
+    document.getElementById('card-morning').classList.toggle('current', phase === 'morning');
+
+    // ---- 今日やること ----
+    const sortedToday = [...todayTasks].sort((a, b) =>
+        (a.completed - b.completed) ||
+        QUADRANT_ORDER[taskQuadrant(a)] - QUADRANT_ORDER[taskQuadrant(b)]
+    );
+    document.getElementById('today-list').innerHTML = sortedToday.length === 0
+        ? '<li class="item-empty">まだありません。朝の確認で選ぶか、「今日やる」にチェックして追加してください。</li>'
+        : sortedToday.map(t => itemRowHTML(t, {
+            check: true,
+            showQuadrant: true,
+            actions: t.completed ? '' : `<button type="button" class="mini-btn icon" data-act="untoday" title="今日やることから外す"><i class="fa-solid fa-xmark"></i></button>`
+        })).join('');
+    const doneCount = todayTasks.length - leftTasks.length;
+    document.getElementById('today-progress-text').textContent = `${doneCount} / ${todayTasks.length}`;
+    document.getElementById('today-progress-fill').style.width =
+        todayTasks.length ? `${Math.round(doneCount / todayTasks.length * 100)}%` : '0%';
+    const focusDisplay = document.getElementById('focus-display');
+    focusDisplay.classList.toggle('hidden', !rec.focus);
+    focusDisplay.innerHTML = rec.focus ? `<small>今日いちばん大事なこと</small>${escapeHTML(rec.focus)}` : '';
+
+    // ---- 夜の振り返り ----
+    const doneToday = countDoneOn(key);
+    document.getElementById('evening-summary').innerHTML =
+        `今日の完了 <strong>${doneToday}</strong> 件` +
+        (todayTasks.length ? `（予定 ${todayTasks.length} 件中 ${doneCount} 件）` : '');
+    document.getElementById('evening-left-step').classList.toggle('hidden', leftTasks.length === 0);
+    document.getElementById('evening-reflect-num').textContent = leftTasks.length ? '2' : '1';
+    document.getElementById('evening-left-list').innerHTML = leftTasks.map(t => itemRowHTML(t, {
+        check: true,
+        actions: `<button type="button" class="mini-btn" data-act="tomorrow">明日へ</button>` +
+                 `<button type="button" class="mini-btn" data-act="untoday">外す</button>`
+    })).join('');
+
+    const reflectionInput = document.getElementById('reflection-input');
+    if (document.activeElement !== reflectionInput) reflectionInput.value = rec.reflection || '';
+
+    const eveningDone = Boolean(rec.eveningAt);
+    const showEveningBody = !eveningDone || eveningExpanded;
+    document.getElementById('evening-body').classList.toggle('hidden', !showEveningBody);
+    const eNote = document.getElementById('evening-done-note');
+    eNote.classList.toggle('hidden', showEveningBody);
+    if (eveningDone) {
+        eNote.textContent = `✓ 完了（${rec.done ?? doneToday} 件達成）` + (rec.reflection ? `\n「${rec.reflection}」` : '');
+    }
+    const eReopen = document.getElementById('btn-evening-reopen');
+    eReopen.classList.toggle('hidden', !eveningDone);
+    eReopen.textContent = eveningExpanded ? '閉じる' : 'もう一度見る';
+    document.getElementById('btn-evening-done').innerHTML = eveningDone
+        ? '<i class="fa-solid fa-moon"></i> 更新して閉じる'
+        : '<i class="fa-solid fa-moon"></i> 夜の振り返りを完了';
+    document.getElementById('card-evening').classList.toggle('current', phase === 'evening');
+
+    // ---- 記録 ----
+    const keys = Object.keys(days).filter(k => days[k].morningAt || days[k].eveningAt || days[k].reflection).sort().reverse().slice(0, 14);
+    document.getElementById('day-log-list').innerHTML = keys.length === 0
+        ? '<li>まだ記録はありません。朝と夜の確認を完了すると、ここに残ります。</li>'
+        : keys.map(k => {
+            const r = days[k];
+            const marks = `${r.morningAt ? '☀' : '・'} ${r.eveningAt ? '🌙' : '・'}`;
+            const count = r.eveningAt ? `${r.done ?? 0}件完了${r.planned ? ` / 予定${r.planned}件` : ''}` : '';
+            return `<li>
+                <div class="log-head">${formatDayLabel(k)} <span>${marks}</span> <span class="log-mark">${count}</span></div>
+                ${r.focus ? `<div class="log-text">🎯 ${escapeHTML(r.focus)}</div>` : ''}
+                ${r.reflection ? `<div class="log-text">📝 ${escapeHTML(r.reflection)}</div>` : ''}
+            </li>`;
+        }).join('');
+}
+
+// ==========================================================================
+// Filtering Tasks (マトリックス・ボード用。未仕分けは除く)
 // ==========================================================================
 function getFilteredTasks() {
     const query = searchInput.value.trim().toLowerCase();
@@ -520,6 +1076,7 @@ function getFilteredTasks() {
     const showCompleted = toggleCompleted.checked;
 
     return tasks.filter(task => {
+        if (task.inbox) return false;
         if (!showCompleted && task.completed) return false;
         if (cat !== 'all' && task.category !== cat) return false;
         if (query) {
@@ -537,205 +1094,207 @@ function getFilteredTasks() {
 // ==========================================================================
 function renderAll() {
     updateHeaderStats();
+    if (currentView === 'today') renderToday();
     if (currentView === 'matrix') renderMatrixGraph();
     if (currentView === 'board') renderBoard();
     if (currentView === 'analytics') renderAnalytics();
 }
 
 function updateHeaderStats() {
-    let q1 = 0, q2 = 0, q3 = 0, q4 = 0;
+    const counts = { q1: 0, q2: 0, q3: 0, q4: 0 };
+    let inbox = 0;
     tasks.forEach(task => {
-        if (!task.completed) {
-            const q = getQuadrant(task.urgency, task.importance);
-            if (q === 'q1') q1++;
-            if (q === 'q2') q2++;
-            if (q === 'q3') q3++;
-            if (q === 'q4') q4++;
-        }
+        if (task.completed) return;
+        if (task.inbox) inbox++;
+        else counts[taskQuadrant(task)]++;
     });
-    document.getElementById('stat-q1').textContent = q1;
-    document.getElementById('stat-q2').textContent = q2;
-    document.getElementById('stat-q3').textContent = q3;
-    document.getElementById('stat-q4').textContent = q4;
+    ['q1', 'q2', 'q3', 'q4'].forEach(q => {
+        document.getElementById(`stat-${q}`).textContent = counts[q];
+    });
+    const badge = document.getElementById('nav-inbox-count');
+    badge.textContent = inbox;
+    badge.classList.toggle('hidden', inbox === 0);
 }
 
 // ==========================================================================
-// VIEW 1: Matrix Graph Rendering & Drag/Drop with Safe Area Padding
+// VIEW 1: Matrix Graph Rendering & Drag/Drop (マウス・タッチ両対応)
 // ==========================================================================
+function getMatrixGeometry(rect) {
+    const padX = Math.max(95, Math.min(135, Math.round(rect.width * 0.18)));
+    const padY = Math.max(36, Math.min(48, Math.round(rect.height * 0.08)));
+    return {
+        padX,
+        padY,
+        usableW: Math.max(100, rect.width - padX * 2),
+        usableH: Math.max(100, rect.height - padY * 2)
+    };
+}
+
 function renderMatrixGraph() {
     matrixTasksLayer.innerHTML = '';
     const filtered = getFilteredTasks();
 
     const rect = matrixCanvasArea.getBoundingClientRect();
     const width = rect.width;
-    const height = rect.height;
+    const { padX: safePaddingX, padY: safePaddingY, usableW: usableWidth, usableH: usableHeight } = getMatrixGeometry(rect);
 
-    // 0%や100%でもカード全貌が枠線やタイトルで隠れないためのワイド・セーフマージン（ハーフスクリーンや狭い画面でも被りゼロ）
-    const safePaddingX = Math.max(95, Math.min(135, Math.round(width * 0.18)));
-    const safePaddingY = Math.max(36, Math.min(48, Math.round(height * 0.08)));
-    const usableWidth = Math.max(100, width - safePaddingX * 2);
-    const usableHeight = Math.max(100, height - safePaddingY * 2);
-
-    // タスクカードの幅と高さ（衝突判定用矩形ボックス）
     const cardWidth = Math.min(185, Math.max(140, Math.round(width * 0.16)));
     const cardHeight = 40;
     const placedBoxes = [];
 
-    filtered.forEach((task, index) => {
-        const q = getQuadrant(task.urgency, task.importance);
+    filtered.forEach((task) => {
+        const q = taskQuadrant(task);
         const point = document.createElement('div');
         point.className = `task-point ${q} ${task.completed ? 'completed' : ''}`;
         point.dataset.id = task.id;
 
-        // 0%〜100%を安全領域内に正確にマッピング
         let xPos = safePaddingX + (task.urgency / 100) * usableWidth;
         let yPos = safePaddingY + ((100 - task.importance) / 100) * usableHeight;
 
-        // 【かぶりゼロ処理1】象限タイトルバッジ（各領域の上部ラベル）との重なりを自動回避！
+        // 象限タイトルとの重なりを回避
         const isUpperHalf = task.importance >= 50;
         if (isUpperHalf && yPos < safePaddingY + 54) {
-            yPos = safePaddingY + 54; // 上半分の象限タイトルすぐ下の安全領域へスライド
+            yPos = safePaddingY + 54;
         }
         if (!isUpperHalf && yPos < safePaddingY + usableHeight * 0.5 + 54 && yPos > safePaddingY + usableHeight * 0.5 - 15) {
-            yPos = safePaddingY + usableHeight * 0.5 + 54; // 下半分の象限タイトルすぐ下の安全領域へスライド
+            yPos = safePaddingY + usableHeight * 0.5 + 54;
         }
 
-        // 【かぶりゼロ処理2】既に配置された全てのタスクカードとの重なりを検知し、スパイラル状にスマート分散！
+        // 他のカードとの重なりをスパイラル状に回避
         let collision = true;
         let attempts = 0;
-        const maxAttempts = 80;
         let angle = 0;
         let radius = 0;
         let testX = xPos;
         let testY = yPos;
 
-        while (collision && attempts < maxAttempts) {
-            collision = false;
-            for (let i = 0; i < placedBoxes.length; i++) {
-                const box = placedBoxes[i];
-                // カード同士の中心座標距離が重なっているかどうかを正確に判定
-                if (Math.abs(testX - box.x) < cardWidth * 0.92 && Math.abs(testY - box.y) < cardHeight * 0.95) {
-                    collision = true;
-                    break;
-                }
-            }
-
+        while (collision && attempts < 80) {
+            collision = placedBoxes.some(box =>
+                Math.abs(testX - box.x) < cardWidth * 0.92 && Math.abs(testY - box.y) < cardHeight * 0.95
+            );
             if (collision) {
                 attempts++;
-                // 渦巻き（スパイラル）状に上下左右斜めへ最適な隙間を探し出し、綺麗に分散配置！
                 radius += 6;
                 angle += Math.PI / 3.5;
-                testX = xPos + Math.cos(angle) * radius;
-                testY = yPos + Math.sin(angle) * radius;
-
-                // 領域外や枠線にはみ出さないよう確実な境界内にクランプ
-                testX = Math.max(safePaddingX, Math.min(safePaddingX + usableWidth, testX));
-                testY = Math.max(safePaddingY + 12, Math.min(safePaddingY + usableHeight - 12, testY));
+                testX = Math.max(safePaddingX, Math.min(safePaddingX + usableWidth, xPos + Math.cos(angle) * radius));
+                testY = Math.max(safePaddingY + 12, Math.min(safePaddingY + usableHeight - 12, yPos + Math.sin(angle) * radius));
             }
         }
 
-        xPos = testX;
-        yPos = testY;
-        placedBoxes.push({ x: xPos, y: yPos });
+        placedBoxes.push({ x: testX, y: testY });
+        point.style.left = `${testX}px`;
+        point.style.top = `${testY}px`;
 
-        point.style.left = `${xPos}px`;
-        point.style.top = `${yPos}px`;
-
-        const iconIcon = task.completed && task.pdcaReview 
-            ? `<i class="fa-solid fa-award pdca-gold-icon" title="PDCA完結検証済み"></i>` 
-            : `<i class="fa-solid fa-brain pdca-mini-icon" title="PDCA戦略仮説設定済み"></i>`;
+        const icon = task.completed
+            ? `<i class="fa-solid fa-award pdca-gold-icon" title="完了"></i>`
+            : (task.today === getTodayKey() ? `<i class="fa-solid fa-sun pdca-mini-icon" title="今日やる"></i>` : '');
 
         point.innerHTML = `
             <div class="task-point-card">
                 <div class="point-dot"></div>
                 <span class="point-title" title="${escapeHTML(task.title)}">${escapeHTML(task.title)}</span>
-                ${iconIcon}
+                ${icon}
             </div>
         `;
 
-        // 【かぶりゼロ処理3】ホバー＆クリック時に絶対に他のどんなカードやタイトルよりも最前面(z-index:999999)へ昇格させる！
         point.addEventListener('mouseenter', () => { point.style.zIndex = '999999'; });
         point.addEventListener('mouseleave', () => { if (!point.classList.contains('dragging')) point.style.zIndex = '15'; });
 
-        let startX = 0, startY = 0;
-        let isDraggingThis = false;
-        let hasMoved = false;
-
-        const onMouseDown = (e) => {
+        point.addEventListener('pointerdown', (e) => {
             if (e.button !== 0) return;
-            isDraggingThis = true;
-            hasMoved = false;
-            draggedTask = task;
-            startX = e.clientX;
-            startY = e.clientY;
+            const startX = e.clientX;
+            const startY = e.clientY;
+            let hasMoved = false;
+            point.setPointerCapture(e.pointerId);
             point.style.transition = 'none';
             point.style.zIndex = '999999';
             point.classList.add('dragging');
 
-            const onMouseMove = (moveEvent) => {
-                if (!isDraggingThis) return;
-                const dx = Math.abs(moveEvent.clientX - startX);
-                const dy = Math.abs(moveEvent.clientY - startY);
-                if (dx > 4 || dy > 4) hasMoved = true;
+            const onMove = (ev) => {
+                if (Math.abs(ev.clientX - startX) > 4 || Math.abs(ev.clientY - startY) > 4) hasMoved = true;
+                if (!hasMoved) return;
+                const canvasRect = matrixCanvasArea.getBoundingClientRect();
+                const g = getMatrixGeometry(canvasRect);
+                const newLeft = Math.max(g.padX, Math.min(canvasRect.width - g.padX, ev.clientX - canvasRect.left));
+                const newTop = Math.max(g.padY, Math.min(canvasRect.height - g.padY, ev.clientY - canvasRect.top));
+                point.style.left = `${newLeft}px`;
+                point.style.top = `${newTop}px`;
 
-                if (hasMoved) {
-                    const canvasRect = matrixCanvasArea.getBoundingClientRect();
-                    const dragSafePaddingX = Math.max(95, Math.min(135, Math.round(canvasRect.width * 0.18)));
-                    const dragSafePaddingY = Math.max(36, Math.min(48, Math.round(canvasRect.height * 0.08)));
-                    const dragUsableWidth = Math.max(100, canvasRect.width - dragSafePaddingX * 2);
-                    const dragUsableHeight = Math.max(100, canvasRect.height - dragSafePaddingY * 2);
-
-                    let newLeft = moveEvent.clientX - canvasRect.left;
-                    let newTop = moveEvent.clientY - canvasRect.top;
-
-                    newLeft = Math.max(dragSafePaddingX, Math.min(canvasRect.width - dragSafePaddingX, newLeft));
-                    newTop = Math.max(dragSafePaddingY, Math.min(canvasRect.height - dragSafePaddingY, newTop));
-
-                    point.style.left = `${newLeft}px`;
-                    point.style.top = `${newTop}px`;
-
-                    const newUrgency = Math.round(((newLeft - dragSafePaddingX) / dragUsableWidth) * 100);
-                    const newImportance = Math.round(((dragUsableHeight - (newTop - dragSafePaddingY)) / dragUsableHeight) * 100);
-                    
-                    task.urgency = Math.max(0, Math.min(100, newUrgency));
-                    task.importance = Math.max(0, Math.min(100, newImportance));
-
-                    const newQ = getQuadrant(task.urgency, task.importance);
-                    point.className = `task-point ${newQ} dragging ${task.completed ? 'completed' : ''}`;
-                }
+                task.urgency = Math.max(0, Math.min(100, Math.round(((newLeft - g.padX) / g.usableW) * 100)));
+                task.importance = Math.max(0, Math.min(100, Math.round(((g.usableH - (newTop - g.padY)) / g.usableH) * 100)));
+                point.className = `task-point ${taskQuadrant(task)} dragging ${task.completed ? 'completed' : ''}`;
             };
 
-            const onMouseUp = () => {
-                isDraggingThis = false;
+            const onUp = () => {
+                point.removeEventListener('pointermove', onMove);
+                point.removeEventListener('pointerup', onUp);
+                point.removeEventListener('pointercancel', onUp);
                 point.classList.remove('dragging');
                 point.style.zIndex = '15';
                 point.style.transition = '';
-                window.removeEventListener('mousemove', onMouseMove);
-                window.removeEventListener('mouseup', onMouseUp);
 
                 if (hasMoved) {
                     saveTasks();
-                    updateHeaderStats();
-                    renderMatrixGraph(); // 座標移動後も全カード同士が絶対に重ならないように即座に自動スマート分散整列！
-                    showToast(`「${task.title.slice(0, 12)}...」の座標を保存しました (緊急度:${task.urgency}%, 重要度:${task.importance}%)`);
-                    if (activeFileHandle) verifyOrRequestPermission(activeFileHandle, false);
+                    renderMatrixGraph();
+                    showToast(`「${task.title.slice(0, 12)}」を移動しました (緊急度${task.urgency}% / 重要度${task.importance}%)`);
                 } else {
                     openDetailModal(task);
                 }
             };
 
-            window.addEventListener('mousemove', onMouseMove);
-            window.addEventListener('mouseup', onMouseUp);
-        };
+            point.addEventListener('pointermove', onMove);
+            point.addEventListener('pointerup', onUp);
+            point.addEventListener('pointercancel', onUp);
+        });
 
-        point.addEventListener('mousedown', onMouseDown);
         matrixTasksLayer.appendChild(point);
     });
 }
 
 // ==========================================================================
-// VIEW 2: Kanban Board Rendering
+// VIEW 2: Kanban Board（列ごとのクイック追加・ドラッグで領域移動）
 // ==========================================================================
+function setupBoardEnhancements() {
+    ['q1', 'q2', 'q3', 'q4'].forEach(q => {
+        const list = document.getElementById(`board-${q}-list`);
+
+        const form = document.createElement('form');
+        form.className = 'column-quick-add';
+        form.autocomplete = 'off';
+        form.innerHTML = `<input type="text" placeholder="＋ この領域に追加（Enter）">`;
+        const input = form.querySelector('input');
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const title = input.value.trim();
+            if (!title) return;
+            tasks.unshift(createTask(title.slice(0, 150), q, false));
+            input.value = '';
+            saveTasks();
+            renderAll();
+            input.focus();
+        });
+        list.after(form);
+
+        list.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            list.classList.add('drop-over');
+        });
+        list.addEventListener('dragleave', (e) => {
+            if (!list.contains(e.relatedTarget)) list.classList.remove('drop-over');
+        });
+        list.addEventListener('drop', (e) => {
+            e.preventDefault();
+            list.classList.remove('drop-over');
+            const task = findTask(e.dataTransfer.getData('text/plain'));
+            if (!task || taskQuadrant(task) === q) return;
+            setTaskQuadrant(task, q);
+            saveTasks();
+            renderAll();
+            showToast(`「${task.title.slice(0, 16)}」→ 第${QUADRANT_SHORT[q]}領域`);
+        });
+    });
+}
+
 function renderBoard() {
     const filtered = getFilteredTasks();
     const lists = {
@@ -745,202 +1304,172 @@ function renderBoard() {
         q4: document.getElementById('board-q4-list')
     };
     const counts = { q1: 0, q2: 0, q3: 0, q4: 0 };
+    const todayKey = getTodayKey();
 
     Object.values(lists).forEach(list => list.innerHTML = '');
 
     filtered.forEach(task => {
-        const q = getQuadrant(task.urgency, task.importance);
+        const q = taskQuadrant(task);
         counts[q]++;
 
         const card = document.createElement('div');
-        card.className = `task-card ${q} ${task.completed ? 'completed' : ''}`;
-        
-        let deadlineMarkup = '';
-        if (task.deadline) {
-            const dt = new Date(task.deadline);
-            const isOver = !task.completed && dt < new Date();
-            const dtStr = `${dt.getMonth()+1}/${dt.getDate()} ${dt.getHours()}:${String(dt.getMinutes()).padStart(2,'0')}`;
-            deadlineMarkup = `
-                <span class="deadline-badge ${isOver ? 'overdue' : ''}">
-                    <i class="fa-regular fa-clock"></i> ${dtStr} ${isOver ? '(超過)' : ''}
-                </span>
-            `;
-        }
+        card.className = `task-card ${q} ${task.completed ? 'completed' : ''} ${task.today === todayKey ? 'today-mark' : ''}`;
+        card.draggable = true;
 
-        const pdcaBadge = task.completed && task.pdcaReview
-            ? `<div class="task-card-pdca-status verified"><i class="fa-solid fa-award"></i> PDCA完結検証済み</div>`
-            : `<div class="task-card-pdca-status"><i class="fa-solid fa-brain"></i> 戦略設定済み (Plan)</div>`;
+        const dl = deadlineInfo(task);
+        const deadlineMarkup = dl
+            ? `<span class="deadline-badge ${dl.warn && !task.completed ? 'overdue' : ''}"><i class="fa-regular fa-clock"></i> ${dl.label}</span>`
+            : '';
+
+        const reviewBadge = task.pdcaReview
+            ? `<div class="task-card-pdca-status verified"><i class="fa-solid fa-award"></i> ふりかえり済み</div>`
+            : (task.pdcaStrategy ? `<div class="task-card-pdca-status"><i class="fa-solid fa-brain"></i> 作戦メモあり</div>` : '');
 
         card.innerHTML = `
             <div class="task-card-header">
                 <span class="task-card-title">${escapeHTML(task.title)}</span>
                 <div class="task-card-actions">
-                    <button class="btn-card-icon check" title="完了確認・振り返り" onclick="toggleTaskComplete(event, '${task.id}')">
+                    <button class="btn-card-icon check" data-act="check" title="${task.completed ? '未完了に戻す' : '完了にする'}">
                         <i class="fa-${task.completed ? 'solid' : 'regular'} fa-circle-check"></i>
                     </button>
-                    <button class="btn-card-icon" title="詳細・編集" onclick="openDetailById(event, '${task.id}')">
-                        <i class="fa-solid fa-chevron-right"></i>
+                    <button class="btn-card-icon" data-act="today" title="${task.today === todayKey ? '今日やることから外す' : '今日やる'}">
+                        <i class="fa-${task.today === todayKey ? 'solid' : 'regular'} fa-sun"></i>
                     </button>
                 </div>
             </div>
-            ${pdcaBadge}
+            ${reviewBadge}
             <div class="task-card-meta">
                 <span class="cat-badge">${escapeHTML(task.category)}</span>
                 ${deadlineMarkup}
             </div>
         `;
 
+        card.addEventListener('dragstart', (e) => {
+            e.dataTransfer.setData('text/plain', task.id);
+            e.dataTransfer.effectAllowed = 'move';
+        });
+
         card.addEventListener('click', (e) => {
-            if (!e.target.closest('.btn-card-icon')) {
+            const btn = e.target.closest('.btn-card-icon');
+            if (!btn) {
                 openDetailModal(task);
+                return;
+            }
+            if (btn.dataset.act === 'check') {
+                toggleComplete(task);
+            } else if (btn.dataset.act === 'today') {
+                task.today = task.today === todayKey ? null : todayKey;
+                saveTasks();
+                renderAll();
+                showToast(task.today ? '☀ 今日やることに入れました' : '今日やることから外しました');
             }
         });
 
         lists[q].appendChild(card);
     });
 
-    document.getElementById('count-board-q1').textContent = counts.q1;
-    document.getElementById('count-board-q2').textContent = counts.q2;
-    document.getElementById('count-board-q3').textContent = counts.q3;
-    document.getElementById('count-board-q4').textContent = counts.q4;
+    ['q1', 'q2', 'q3', 'q4'].forEach(q => {
+        document.getElementById(`count-board-${q}`).textContent = counts[q];
+    });
 }
-
-window.toggleTaskComplete = function(event, id) {
-    event.stopPropagation();
-    const task = tasks.find(t => t.id === id);
-    if (task) {
-        if (task.completed) {
-            task.completed = false;
-            saveTasks();
-            renderAll();
-            showToast('タスクを未完了に戻しました');
-        } else {
-            openReviewModal(task);
-        }
-    }
-};
-
-window.openDetailById = function(event, id) {
-    event.stopPropagation();
-    const task = tasks.find(t => t.id === id);
-    if (task) openDetailModal(task);
-};
 
 // ==========================================================================
 // VIEW 3: Analytics & Smart Coaching Advice
 // ==========================================================================
 function renderAnalytics() {
-    const activeTasks = tasks.filter(t => !t.completed);
+    const activeTasks = tasks.filter(t => !t.completed && !t.inbox);
     const total = activeTasks.length;
 
-    let counts = { q1: 0, q2: 0, q3: 0, q4: 0 };
-    activeTasks.forEach(task => {
-        const q = getQuadrant(task.urgency, task.importance);
-        counts[q]++;
-    });
+    const counts = { q1: 0, q2: 0, q3: 0, q4: 0 };
+    activeTasks.forEach(task => counts[taskQuadrant(task)]++);
 
     const getPerc = (c) => total === 0 ? 0 : Math.round((c / total) * 100);
-    const p1 = getPerc(counts.q1);
-    const p2 = getPerc(counts.q2);
-    const p3 = getPerc(counts.q3);
-    const p4 = getPerc(counts.q4);
-
-    document.getElementById('bar-percentage-q1').textContent = `${p1}% (${counts.q1}件)`;
-    document.getElementById('bar-fill-q1').style.width = `${p1}%`;
-
-    document.getElementById('bar-percentage-q2').textContent = `${p2}% (${counts.q2}件)`;
-    document.getElementById('bar-fill-q2').style.width = `${p2}%`;
-
-    document.getElementById('bar-percentage-q3').textContent = `${p3}% (${counts.q3}件)`;
-    document.getElementById('bar-fill-q3').style.width = `${p3}%`;
-
-    document.getElementById('bar-percentage-q4').textContent = `${p4}% (${counts.q4}件)`;
-    document.getElementById('bar-fill-q4').style.width = `${p4}%`;
+    const perc = {};
+    ['q1', 'q2', 'q3', 'q4'].forEach(q => {
+        perc[q] = getPerc(counts[q]);
+        document.getElementById(`bar-percentage-${q}`).textContent = `${perc[q]}% (${counts[q]}件)`;
+        document.getElementById(`bar-fill-${q}`).style.width = `${perc[q]}%`;
+    });
+    const { q1: p1, q2: p2, q3: p3, q4: p4 } = perc;
 
     const container = document.getElementById('coaching-message-container');
-    container.innerHTML = '';
+    const bubbles = [];
 
     if (total === 0) {
-        container.innerHTML = `
-            <div class="coach-bubble">
-                現在アクティブなタスクがありません！右上の「新規タスク追加」から、成功戦略仮説（Plan）を立てて新しいタスクを登録しましょう。
-            </div>
-        `;
+        container.innerHTML = `<div class="coach-bubble">未完了のタスクがありません。「今日」タブの入力欄から、やることを追加しましょう。</div>`;
         return;
     }
 
     if (p1 >= 40) {
-        container.innerHTML += `
-            <div class="coach-bubble warning">
-                <strong>🔥 警告：【第I領域：必須・火消し】が過多（${p1}%）になっています！</strong><br>
-                締め切りやトラブルに追われやすい状態です。各タスクの『PDCA障害予測と対策』を見直し、手戻りを極限まで減らして一気に攻略しましょう！
-            </div>
-        `;
+        bubbles.push(`<div class="coach-bubble warning">
+            <strong>🔥 第I領域（緊急・重要）が ${p1}% と多めです</strong><br>
+            締め切りに追われやすい状態です。朝の確認で第IIを1つ先に入れて、火消しの元を減らしていきましょう。
+        </div>`);
     }
 
     if (p2 >= 40) {
-        container.innerHTML += `
-            <div class="coach-bubble">
-                <strong>✨ 素晴らしい状態：【第II領域：価値・投資】に時間を配分できています（${p2}%）！</strong><br>
-                事前の『成功戦略仮説』に基づき、集中時間を確保して着実に実行していきましょう。これらが完了した時の『Check＆Action（振り返り）』が一番の財産になります。
-            </div>
-        `;
+        bubbles.push(`<div class="coach-bubble">
+            <strong>✨ 第II領域（重要・急がない）に ${p2}% 配分できています</strong><br>
+            この調子で、毎朝1つは「今日やる」に入れて少しずつ進めましょう。
+        </div>`);
     } else if (counts.q2 === 0) {
-        container.innerHTML += `
-            <div class="coach-bubble warning">
-                <strong>💎 提案：【第II領域：価値・投資】のタスクを少なくとも1つ登録しましょう！</strong><br>
-                自分のスキルアップや業務自動化など、「すぐやらなくても怒られないが、後から10倍の価値を生むタスク」の戦略を立てて登録してみてください。
-            </div>
-        `;
+        bubbles.push(`<div class="coach-bubble warning">
+            <strong>💎 第II領域のタスクを1つ登録しましょう</strong><br>
+            スキルアップや仕組みづくりなど「今やらなくても怒られないが、後で効いてくること」を入れてみてください。
+        </div>`);
     }
 
     if (p3 + p4 >= 40) {
-        container.innerHTML += `
-            <div class="coach-bubble info">
-                <strong>⚠️ 注意：見せかけや無駄な時間（第III・第IV領域）が全体の${p3 + p4}%を占めています</strong><br>
-                登録時の成功戦略ステップ（Plan）で「どうやったらこのタスクを人に任せられるか？または断れるか？」を仮説として設定してみることをお勧めします。
-            </div>
-        `;
+        bubbles.push(`<div class="coach-bubble info">
+            <strong>⚠️ 第III・第IV領域が ${p3 + p4}% を占めています</strong><br>
+            人に任せる・断る・やめる、ができないか夜の振り返りで考えてみましょう。
+        </div>`);
     }
 
-    if (container.innerHTML === '') {
-        container.innerHTML = `
-            <div class="coach-bubble">
-                タスクのバランスは良好です！「事前の仮説づくり（Plan） ➡ 実行（Do） ➡ 振り返り検証（Check/Action）」のサイクルを回して最高の成果を出し続けましょう！
-            </div>
-        `;
+    const streak = computeStreak();
+    if (streak >= 2) {
+        bubbles.push(`<div class="coach-bubble"><strong>🔥 朝・夜の確認が ${streak} 日連続です</strong><br>続けることがいちばんの力になります。</div>`);
     }
+
+    container.innerHTML = bubbles.length ? bubbles.join('') : `
+        <div class="coach-bubble">
+            バランスは良好です。朝に決めて、夜に振り返るサイクルを続けていきましょう。
+        </div>`;
 }
 
 // ==========================================================================
-// Modals Control (Wizard & Forced PDCA Strategy)
+// Task Modal（1画面・必須はタイトルだけ）
 // ==========================================================================
 function openTaskModal(taskToEdit = null) {
-    showWizardStep(1);
+    taskForm.reset();
+    const todayCheck = document.getElementById('task-today');
 
     if (taskToEdit) {
+        document.getElementById('task-modal-title').innerHTML = '<i class="fa-solid fa-pen-to-square"></i> やることを編集';
         document.getElementById('task-id').value = taskToEdit.id;
         document.getElementById('task-title').value = taskToEdit.title;
-        document.getElementById('task-category').value = taskToEdit.category || '仕事';
+        document.getElementById('task-category').value = taskToEdit.category || 'その他';
         document.getElementById('task-deadline').value = taskToEdit.deadline || '';
-        document.getElementById('task-urgency').value = taskToEdit.urgency;
-        document.getElementById('task-importance').value = taskToEdit.importance;
+        taskUrgencySlider.value = taskToEdit.urgency;
+        taskImportanceSlider.value = taskToEdit.importance;
         document.getElementById('task-notes').value = taskToEdit.notes || '';
+        todayCheck.checked = taskToEdit.today === getTodayKey();
+        modalQuadrant = taskToEdit.inbox ? '' : taskQuadrant(taskToEdit);
 
-        // Strategy fields
         document.getElementById('pdca-strategy').value = taskToEdit.pdcaStrategy?.strategy || '';
         document.getElementById('pdca-obstacle').value = taskToEdit.pdcaStrategy?.obstacle || '';
         document.getElementById('pdca-goal').value = taskToEdit.pdcaStrategy?.goal || '';
+        document.getElementById('details-pdca').open = Boolean(taskToEdit.pdcaStrategy);
     } else {
-        taskForm.reset();
+        document.getElementById('task-modal-title').innerHTML = '<i class="fa-solid fa-plus"></i> やることを追加';
         document.getElementById('task-id').value = '';
-        document.getElementById('task-urgency').value = 75;
-        document.getElementById('task-importance').value = 80;
-
-        document.getElementById('pdca-strategy').value = '';
-        document.getElementById('pdca-obstacle').value = '';
-        document.getElementById('pdca-goal').value = '';
+        document.getElementById('task-category').value = 'その他';
+        taskUrgencySlider.value = QUADRANT_PRESETS.q1.urgency;
+        taskImportanceSlider.value = QUADRANT_PRESETS.q1.importance;
+        modalQuadrant = 'q1';
+        document.getElementById('details-pdca').open = false;
     }
+    document.getElementById('details-sliders').open = false;
 
     updateLivePreview();
     modalTask.classList.add('show');
@@ -954,60 +1483,46 @@ function closeTaskModal() {
 function saveFormTask() {
     const id = document.getElementById('task-id').value;
     const title = document.getElementById('task-title').value.trim();
-    const category = document.getElementById('task-category').value;
-    const deadline = document.getElementById('task-deadline').value;
-    const urgency = parseInt(document.getElementById('task-urgency').value, 10);
-    const importance = parseInt(document.getElementById('task-importance').value, 10);
-    const notes = document.getElementById('task-notes').value.trim();
-
-    // Forced Strategy inputs
-    const strategy = document.getElementById('pdca-strategy').value.trim();
-    const obstacle = document.getElementById('pdca-obstacle').value.trim();
-    const goal = document.getElementById('pdca-goal').value.trim();
-
     if (!title) {
-        showWizardStep(1);
-        showToast('タスク名を入力してください');
-        return;
-    }
-    if (!strategy || !obstacle || !goal) {
-        showWizardStep(2);
-        showToast('⚠️ PDCAの成功仮説・戦略・ゴールをすべて入力してください！');
+        showToast('やることの名前を入力してください');
         return;
     }
 
-    const pdcaStrategy = { strategy, obstacle, goal };
+    const existing = id ? findTask(id) : null;
+    const todayKey = getTodayKey();
+    const wantToday = document.getElementById('task-today').checked;
+    let today = existing ? existing.today : null;
+    if (wantToday) today = todayKey;
+    else if (today === todayKey) today = null;
 
-    if (id) {
-        const index = tasks.findIndex(t => t.id === id);
-        if (index !== -1) {
-            tasks[index] = sanitizeTask({ ...tasks[index], title, category, deadline, urgency, importance, notes, pdcaStrategy });
-        }
-        showToast('タスクと戦略仮説を確実に保存しました！🛡️');
+    const fields = {
+        title,
+        category: document.getElementById('task-category').value,
+        deadline: document.getElementById('task-deadline').value || null,
+        urgency: parseInt(taskUrgencySlider.value, 10),
+        importance: parseInt(taskImportanceSlider.value, 10),
+        notes: document.getElementById('task-notes').value.trim(),
+        inbox: modalQuadrant === '',
+        today,
+        pdcaStrategy: sanitizeStrategy({
+            strategy: document.getElementById('pdca-strategy').value,
+            obstacle: document.getElementById('pdca-obstacle').value,
+            goal: document.getElementById('pdca-goal').value
+        })
+    };
+
+    if (existing) {
+        const index = tasks.indexOf(existing);
+        tasks[index] = sanitizeTask({ ...existing, ...fields });
+        showToast('保存しました');
     } else {
-        const newTask = sanitizeTask({
-            id: 'task-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
-            title,
-            category,
-            deadline,
-            urgency,
-            importance,
-            notes,
-            pdcaStrategy,
-            pdcaReview: null,
-            completed: false,
-            createdAt: Date.now()
-        });
-        tasks.unshift(newTask);
-        showToast('PDCA戦略仮説付きで新規タスクを確実に保存しました！🛡️');
+        tasks.unshift(sanitizeTask({ ...fields, id: newTaskId(), completed: false, createdAt: Date.now() }));
+        showToast('追加しました');
     }
 
     saveTasks();
     closeTaskModal();
     renderAll();
-    
-    // バックグラウンドでファイル権限を自動再検証＆即座同期！
-    if (activeFileHandle) verifyOrRequestPermission(activeFileHandle, false);
 }
 
 // ==========================================================================
@@ -1049,27 +1564,30 @@ function renderBackupHistory() {
 
 window.restoreSnapshot = function(idx) {
     if (!backupHistory[idx] || !backupHistory[idx].data) return;
-    if (confirm(`【確認】タイムスタンプ [${backupHistory[idx].timestamp}] のスナップショット (${backupHistory[idx].count}件のタスク) を復元して適用しますか？`)) {
-        tasks = JSON.parse(JSON.stringify(backupHistory[idx].data));
+    if (confirm(`【確認】[${backupHistory[idx].timestamp}] の状態 (${backupHistory[idx].count}件) に戻しますか？`)) {
+        tasks = backupHistory[idx].data.map((t, i) => sanitizeTask(t, i)).filter(Boolean);
         saveTasks();
         renderAll();
         closeBackupModal();
-        showToast('バックアップからタスクデータを完全に復元しました！🎉');
+        showToast('バックアップから復元しました');
     }
 };
 
 // ==========================================================================
-// FORCED PDCA REVIEW MODAL (Check & Action)
+// Review Modal（任意）
 // ==========================================================================
 function openReviewModal(task) {
     reviewTargetTaskId = task.id;
     document.getElementById('review-task-title').textContent = task.title;
 
-    const origBox = document.getElementById('review-original-strategy');
-    origBox.innerHTML = `
-        <strong>🎯 立てていた成功戦略:</strong> ${escapeHTML(task.pdcaStrategy?.strategy || '設定なし')}<br>
-        <strong>🏁 目指した完了ゴール:</strong> ${escapeHTML(task.pdcaStrategy?.goal || '設定なし')}
-    `;
+    const planBox = document.getElementById('review-plan-box');
+    planBox.classList.toggle('hidden', !task.pdcaStrategy);
+    if (task.pdcaStrategy) {
+        document.getElementById('review-original-strategy').innerHTML = `
+            <strong>🎯 作戦:</strong> ${escapeHTML(task.pdcaStrategy.strategy || '—')}<br>
+            <strong>🏁 完了の目安:</strong> ${escapeHTML(task.pdcaStrategy.goal || '—')}
+        `;
+    }
 
     document.getElementById('review-result').value = task.pdcaReview?.result || '';
     document.getElementById('review-action').value = task.pdcaReview?.action || '';
@@ -1084,28 +1602,18 @@ function closeReviewModal() {
 }
 
 function saveReviewAndCompleteTask() {
-    if (!reviewTargetTaskId) return;
-    const task = tasks.find(t => t.id === reviewTargetTaskId);
+    const task = findTask(reviewTargetTaskId);
     if (!task) return;
 
     const result = document.getElementById('review-result').value.trim();
     const action = document.getElementById('review-action').value.trim();
-
-    if (!result || !action) {
-        showToast('⚠️ 振り返り結果と次回アクションを入力してください！');
-        return;
-    }
-
-    task.pdcaReview = { result, action };
-    task.completed = true;
+    task.pdcaReview = (result || action) ? { result, action } : null;
+    if (!task.completed) setTaskCompleted(task, true);
 
     saveTasks();
     closeReviewModal();
     renderAll();
-    showToast('🏆 PDCA振り返り完了！完了メダルを獲得し確実に保存しました！🎉');
-    
-    // バックグラウンドでファイル権限を自動再検証＆即座同期！
-    if (activeFileHandle) verifyOrRequestPermission(activeFileHandle, false);
+    showToast('🏆 保存しました');
 }
 
 // ==========================================================================
@@ -1113,22 +1621,26 @@ function saveReviewAndCompleteTask() {
 // ==========================================================================
 function openDetailModal(task) {
     activeTaskId = task.id;
-    const q = getQuadrant(task.urgency, task.importance);
+    const q = taskQuadrant(task);
+    const todayKey = getTodayKey();
 
     const qBadge = document.getElementById('detail-quadrant-badge');
-    qBadge.className = `q-badge ${q}`;
-    qBadge.textContent = getQuadrantName(q);
+    qBadge.className = task.inbox ? 'q-badge' : `q-badge ${q}`;
+    qBadge.textContent = task.inbox ? '未仕分け' : getQuadrantName(q);
 
-    document.getElementById('detail-category-badge').textContent = task.category || '未指定';
+    document.getElementById('detail-category-badge').textContent = task.category || 'その他';
     document.getElementById('detail-title').textContent = task.title;
 
     const statusBadge = document.getElementById('detail-pdca-status-badge');
-    if (task.completed && task.pdcaReview) {
+    if (task.completed) {
         statusBadge.className = 'pdca-status-badge verified';
-        statusBadge.innerHTML = '<i class="fa-solid fa-award"></i> PDCA完結検証済み';
-    } else {
+        statusBadge.innerHTML = '<i class="fa-solid fa-award"></i> 完了';
+    } else if (task.today === todayKey) {
         statusBadge.className = 'pdca-status-badge';
-        statusBadge.innerHTML = '<i class="fa-solid fa-brain"></i> 戦略実行中 (Plan & Do)';
+        statusBadge.innerHTML = '<i class="fa-solid fa-sun"></i> 今日やる';
+    } else {
+        statusBadge.className = 'pdca-status-badge hidden';
+        statusBadge.innerHTML = '';
     }
 
     document.getElementById('detail-urgency-bar').style.width = `${task.urgency}%`;
@@ -1140,23 +1652,25 @@ function openDetailModal(task) {
     if (task.deadline) {
         deadlineRow.style.display = 'flex';
         const dt = new Date(task.deadline);
-        const dtStr = `${dt.getFullYear()}/${dt.getMonth()+1}/${dt.getDate()} ${dt.getHours()}:${String(dt.getMinutes()).padStart(2,'0')}`;
-        document.getElementById('detail-deadline-text').textContent = dtStr;
+        document.getElementById('detail-deadline-text').textContent =
+            `${dt.getFullYear()}/${dt.getMonth() + 1}/${dt.getDate()} ${dt.getHours()}:${String(dt.getMinutes()).padStart(2, '0')}`;
     } else {
         deadlineRow.style.display = 'none';
     }
 
-    document.getElementById('detail-pdca-strategy').textContent = task.pdcaStrategy?.strategy || '設定なし';
-    document.getElementById('detail-pdca-obstacle').textContent = task.pdcaStrategy?.obstacle || '設定なし';
-    document.getElementById('detail-pdca-goal').textContent = task.pdcaStrategy?.goal || '設定なし';
+    const planArea = document.getElementById('pdca-plan-display-area');
+    planArea.classList.toggle('hidden', !task.pdcaStrategy);
+    if (task.pdcaStrategy) {
+        document.getElementById('detail-pdca-strategy').textContent = task.pdcaStrategy.strategy || '—';
+        document.getElementById('detail-pdca-obstacle').textContent = task.pdcaStrategy.obstacle || '—';
+        document.getElementById('detail-pdca-goal').textContent = task.pdcaStrategy.goal || '—';
+    }
 
     const reviewArea = document.getElementById('pdca-review-display-area');
-    if (task.completed && task.pdcaReview) {
-        reviewArea.classList.remove('hidden');
-        document.getElementById('detail-review-result').textContent = task.pdcaReview.result;
-        document.getElementById('detail-review-action').textContent = task.pdcaReview.action;
-    } else {
-        reviewArea.classList.add('hidden');
+    reviewArea.classList.toggle('hidden', !task.pdcaReview);
+    if (task.pdcaReview) {
+        document.getElementById('detail-review-result').textContent = task.pdcaReview.result || '—';
+        document.getElementById('detail-review-action').textContent = task.pdcaReview.action || '—';
     }
 
     document.getElementById('detail-notes-text').textContent = task.notes || 'メモはありません。';
@@ -1167,8 +1681,18 @@ function openDetailModal(task) {
         btnToggle.innerHTML = '<i class="fa-solid fa-rotate-left"></i> 未完了に戻す';
     } else {
         btnToggle.className = 'btn btn-success';
-        btnToggle.innerHTML = '<i class="fa-solid fa-check"></i> 完了にする (PDCA振り返りへ)';
+        btnToggle.innerHTML = '<i class="fa-solid fa-check"></i> 完了にする';
     }
+
+    const btnToday = document.getElementById('btn-toggle-today');
+    btnToday.classList.toggle('hidden', task.completed);
+    btnToday.innerHTML = task.today === todayKey
+        ? '<i class="fa-solid fa-sun"></i> 今日から外す'
+        : '<i class="fa-regular fa-sun"></i> 今日やる';
+
+    document.getElementById('btn-write-review').innerHTML = task.pdcaReview
+        ? '<i class="fa-solid fa-pen-nib"></i> ふりかえり編集'
+        : '<i class="fa-solid fa-pen-nib"></i> ふりかえり';
 
     modalDetail.classList.add('show');
 }
@@ -1179,18 +1703,18 @@ function closeDetailModal() {
 }
 
 // ==========================================================================
-// JSON Import & Export (File System Absolute Safety)
+// JSON Import & Export
 // ==========================================================================
 function exportJSON() {
     saveTasks();
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(tasks, null, 2));
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(buildFilePayload(), null, 2));
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute("href", dataStr);
     downloadAnchor.setAttribute("download", `eisenhower_pdca_backup_${new Date().toISOString().slice(0, 10)}.json`);
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
-    showToast('💾 PCにJSONファイルとしてタスクデータを保存しました！');
+    showToast('💾 JSONファイルとして保存しました');
 }
 
 function importJSON(e) {
@@ -1200,18 +1724,20 @@ function importJSON(e) {
     const reader = new FileReader();
     reader.onload = function(event) {
         try {
-            const imported = JSON.parse(event.target.result);
-            if (Array.isArray(imported)) {
-                tasks = imported;
+            const payload = parseDataPayload(JSON.parse(event.target.result));
+            if (payload) {
+                saveTasks(true); // 読込前の状態をスナップショット
+                applyDataPayload(payload);
                 saveTasks();
                 renderAll();
-                showToast(`🎉 PCから${imported.length}件のタスクデータを完全に復元・保存しました！`);
+                showToast(`🎉 ${tasks.length}件のタスクを読み込みました`);
             } else {
                 alert('無効なファイル形式です。');
             }
         } catch (err) {
             alert('JSONの読み込みエラー: ' + err.message);
         }
+        e.target.value = '';
     };
     reader.readAsText(file);
 }
@@ -1222,39 +1748,27 @@ function importJSON(e) {
 let isSyncingFile = false;
 
 function setupDirectFileSyncListeners() {
-    const btnLink = document.getElementById('btn-link-local-file');
-    const btnSaveDirect = document.getElementById('btn-direct-save-file');
-    const btnMenuLink = document.getElementById('btn-menu-link-local');
-    const btnMenuSave = document.getElementById('btn-menu-direct-save');
-    const btnBackupLink = document.getElementById('btn-backup-link-local');
     const syncBadge = document.getElementById('file-sync-status');
 
-    if (btnLink) btnLink.addEventListener('click', linkLocalFileDirectly);
-    if (btnSaveDirect) btnSaveDirect.addEventListener('click', () => saveToDirectLocalFile(false));
-    if (btnMenuLink) btnMenuLink.addEventListener('click', linkLocalFileDirectly);
-    if (btnMenuSave) btnMenuSave.addEventListener('click', () => saveToDirectLocalFile(false));
-    if (btnBackupLink) btnBackupLink.addEventListener('click', linkLocalFileDirectly);
-    
-    // ステータスバッジをクリックするだけで、ブラウザ再読込後のファイル権限を即座に自動再取得・復元！
-    if (syncBadge) {
-        syncBadge.style.cursor = 'pointer';
-        syncBadge.title = 'クリックしてファイルの接続をただちに再開・更新する';
-        syncBadge.addEventListener('click', async () => {
-            if (activeFileHandle) {
-                await verifyOrRequestPermission(activeFileHandle, true);
-            } else {
-                await linkLocalFileDirectly();
-            }
-        });
-    }
+    document.getElementById('btn-link-local-file').addEventListener('click', linkLocalFileDirectly);
+    document.getElementById('btn-direct-save-file').addEventListener('click', () => saveToDirectLocalFile(false));
+    document.getElementById('btn-menu-link-local').addEventListener('click', linkLocalFileDirectly);
+    document.getElementById('btn-menu-direct-save').addEventListener('click', () => saveToDirectLocalFile(false));
+    document.getElementById('btn-backup-link-local').addEventListener('click', linkLocalFileDirectly);
+
+    // バッジのクリックで、再起動後のファイル権限を再取得
+    syncBadge.style.cursor = 'pointer';
+    syncBadge.title = 'クリックしてファイルの接続を再開・更新する';
+    syncBadge.addEventListener('click', async () => {
+        if (activeFileHandle) await verifyOrRequestPermission(activeFileHandle, true);
+        else await linkLocalFileDirectly();
+    });
 }
 
-// IndexedDBへのファイルハンドル永続化ユーティリティ
 async function saveFileHandleToIDB(handle) {
     if (!handle) return;
     try {
         await setIDBData('HandlesStore', 'main_task_file', handle);
-        console.info('FileHandle persisted to IndexedDB successfully.');
     } catch (e) {
         console.warn('Could not persist FileHandle to IndexedDB:', e);
     }
@@ -1268,7 +1782,14 @@ async function getFileHandleFromIDB() {
     }
 }
 
-// 起動時に呼び出される「自動再接続＆復元」心臓部エンジン
+async function readPayloadFromHandle(handle) {
+    const file = await handle.getFile();
+    const text = await file.text();
+    if (!text || !text.trim()) return { file, payload: null };
+    return { file, payload: parseDataPayload(JSON.parse(text)) };
+}
+
+// 起動時の自動再接続
 async function initAndRestoreDirectFileSync() {
     if (!('showOpenFilePicker' in window)) return;
     try {
@@ -1278,22 +1799,15 @@ async function initAndRestoreDirectFileSync() {
         activeFileHandle = savedHandle;
         const permission = await activeFileHandle.queryPermission({ mode: 'readwrite' });
         if (permission === 'granted') {
-            // 完全に許可済みなら、即座にファイルから最新のJSONを読み出し・完全同期！
-            const file = await activeFileHandle.getFile();
-            const text = await file.text();
-            if (text && text.trim()) {
-                const parsed = JSON.parse(text);
-                if (Array.isArray(parsed)) {
-                    tasks = parsed.map((t, idx) => sanitizeTask(t, idx)).filter(Boolean);
-                    saveTasks(true, true); // ローカルの5重バックアップにも反映
-                    renderAll();
-                    showToast(`⚡ PCファイル「${file.name}」と自動再接続しデータを完全同期しました！`);
-                }
+            const { file, payload } = await readPayloadFromHandle(activeFileHandle);
+            if (payload) {
+                applyDataPayload(payload);
+                saveTasks(true, true);
+                renderAll();
+                showToast(`⚡ 「${file.name}」と同期しました`);
             }
         } else {
-            // 再起動などでブラウザ仕様による再認可(1クリック)が必要な状態
-            console.info('FileHandle restored from IndexedDB. Waiting for user click to re-verify permission.');
-            showToast(`⚡ 前回の保存先「${activeFileHandle.name}」を検出しました。バッジやボタンクリックで自動再接続されます！`);
+            showToast(`⚡ 前回のファイル「${activeFileHandle.name}」があります。上部のバッジをクリックで再接続`);
         }
         updateFileSyncUI();
     } catch (e) {
@@ -1301,7 +1815,6 @@ async function initAndRestoreDirectFileSync() {
     }
 }
 
-// 権限確認・自動再要求ユーティリティ
 async function verifyOrRequestPermission(handle, forcePrompt = false) {
     if (!handle) return false;
     try {
@@ -1311,20 +1824,15 @@ async function verifyOrRequestPermission(handle, forcePrompt = false) {
         }
         if ((await handle.requestPermission(opts)) === 'granted') {
             updateFileSyncUI();
-            // 権限が得られたらただちにファイル読み込み＆最新化または書き出し！
             try {
-                const file = await handle.getFile();
-                const text = await file.text();
-                if (text && text.trim()) {
-                    const parsed = JSON.parse(text);
-                    if (Array.isArray(parsed) && parsed.length >= tasks.length) {
-                        tasks = parsed.map((t, idx) => sanitizeTask(t, idx)).filter(Boolean);
-                        renderAll();
-                    }
+                const { payload } = await readPayloadFromHandle(handle);
+                if (payload && payload.tasks.length >= tasks.length) {
+                    applyDataPayload(payload);
+                    renderAll();
                 }
                 saveToDirectLocalFile(true);
             } catch (err) {}
-            showToast(`⚡ 「${handle.name}」とのファイル連携を完全に再開しました！`);
+            showToast(`⚡ 「${handle.name}」との連携を再開しました`);
             return true;
         }
         return false;
@@ -1338,30 +1846,28 @@ function updateFileSyncUI() {
     const badgeText = document.getElementById('file-sync-text');
     const saveBtn = document.getElementById('btn-direct-save-file');
 
-    if (!badge || !badgeText) return;
-
     if (activeFileHandle) {
         badge.classList.add('active');
         activeFileHandle.queryPermission({ mode: 'readwrite' }).then(perm => {
             if (perm === 'granted') {
                 badgeText.innerHTML = `<i class="fa-solid fa-bolt"></i> 接続中: <strong>${escapeHTML(activeFileHandle.name)}</strong> (自動保存中)`;
             } else {
-                badgeText.innerHTML = `<i class="fa-solid fa-plug-circle-exclamation"></i> 前回のファイル: <strong>${escapeHTML(activeFileHandle.name)}</strong> (クリックして即接続)`;
+                badgeText.innerHTML = `<i class="fa-solid fa-plug-circle-exclamation"></i> 前回のファイル: <strong>${escapeHTML(activeFileHandle.name)}</strong> (クリックして接続)`;
             }
         }).catch(() => {
             badgeText.innerHTML = `<i class="fa-solid fa-folder-open"></i> 同期候補: <strong>${escapeHTML(activeFileHandle.name)}</strong>`;
         });
-        if (saveBtn) saveBtn.classList.remove('hidden');
+        saveBtn.classList.remove('hidden');
     } else {
         badge.classList.remove('active');
         badgeText.textContent = 'PCファイル未連携 (ブラウザ内保護中)';
-        if (saveBtn) saveBtn.classList.add('hidden');
+        saveBtn.classList.add('hidden');
     }
 }
 
 async function linkLocalFileDirectly() {
     if (!('showOpenFilePicker' in window)) {
-        showToast('お使いのブラウザはダイレクトファイル同期に対応していません。通常のJSON保存をご利用ください。');
+        showToast('このブラウザはファイル直接同期に対応していません。JSON保存をご利用ください。');
         return;
     }
     try {
@@ -1373,31 +1879,24 @@ async function linkLocalFileDirectly() {
             multiple: false
         });
         activeFileHandle = handle;
-        await saveFileHandleToIDB(handle); // IndexedDBへ永続保存！ウェブを閉じても消えない！
+        await saveFileHandleToIDB(handle);
 
-        const file = await handle.getFile();
-        const text = await file.text();
         try {
-            if (text.trim()) {
-                const parsed = JSON.parse(text);
-                if (Array.isArray(parsed)) {
-                    tasks = parsed.map((t, idx) => sanitizeTask(t, idx)).filter(Boolean);
-                    saveTasks(false, true); // LocalStorage/Snapshot等バックアップにも即反映
-                    renderAll();
-                    showToast(`⚡ 「${file.name}」と直接接続＆永続同期しました！以降ウェブを閉じても再接続されます。`);
-                } else {
-                    showToast(`⚡ 「${file.name}」と接続しました！自動または保存ボタンで書き込まれます。`);
-                }
+            const { file, payload } = await readPayloadFromHandle(handle);
+            if (payload) {
+                applyDataPayload(payload);
+                saveTasks(false, true);
+                renderAll();
+                showToast(`⚡ 「${file.name}」と接続しました。次回からも自動で再接続します`);
             } else {
-                showToast(`⚡ 「${file.name}」(新規ファイル)と接続しました！自動で書き込まれます。`);
+                showToast(`⚡ 「${file.name}」と接続しました。変更は自動で書き込まれます`);
+                saveToDirectLocalFile(true);
             }
         } catch (err) {
-            showToast(`⚡ 「${file.name}」と接続しました！(現在のタスクをファイルへ上書き保存可能です)`);
+            showToast(`⚡ 「${handle.name}」と接続しました（現在のタスクで上書き保存できます）`);
         }
         updateFileSyncUI();
-        if (modalBackup && modalBackup.classList.contains('show')) {
-            modalBackup.classList.remove('show');
-        }
+        modalBackup.classList.remove('show');
     } catch (e) {
         if (e.name !== 'AbortError') {
             console.error('File link error:', e);
@@ -1415,7 +1914,7 @@ async function saveToDirectLocalFile(silent = false) {
     try {
         isSyncingFile = true;
         if (!activeFileHandle) {
-            if (silent) { isSyncingFile = false; return; }
+            if (silent) return;
             activeFileHandle = await window.showSaveFilePicker({
                 suggestedName: 'tasks_data.json',
                 types: [{
@@ -1423,21 +1922,20 @@ async function saveToDirectLocalFile(silent = false) {
                     accept: { 'application/json': ['.json'] }
                 }]
             });
-            await saveFileHandleToIDB(activeFileHandle); // IndexedDBへ永続保存！
+            await saveFileHandleToIDB(activeFileHandle);
         } else {
-            // 権限確認・再認可（必要な場合のみ）
             const ok = await verifyOrRequestPermission(activeFileHandle, !silent);
-            if (!ok) { isSyncingFile = false; return; }
+            if (!ok) return;
         }
         const writable = await activeFileHandle.createWritable();
-        await writable.write(JSON.stringify(tasks, null, 2));
+        await writable.write(JSON.stringify(buildFilePayload(), null, 2));
         await writable.close();
         updateFileSyncUI();
-        if (!silent) showToast(`💾 フォルダ内の「${activeFileHandle.name}」へ直接・完全に上書き保存しました！`);
+        if (!silent) showToast(`💾 「${activeFileHandle.name}」へ保存しました`);
     } catch (e) {
         if (e.name !== 'AbortError') {
             console.error('File write error:', e);
-            if (!silent) showToast('直接保存に失敗しました。ファイルが開いたままになっていないかご確認ください。');
+            if (!silent) showToast('直接保存に失敗しました。ファイルが他で開かれていないか確認してください。');
         }
     } finally {
         isSyncingFile = false;
@@ -1447,31 +1945,20 @@ async function saveToDirectLocalFile(silent = false) {
 // ==========================================================================
 // Utility Helpers
 // ==========================================================================
+let toastTimer = null;
 function showToast(msg) {
     const toast = document.getElementById('toast');
     document.getElementById('toast-message').textContent = msg;
     toast.classList.remove('hidden');
-    setTimeout(() => {
-        toast.classList.add('hidden');
-    }, 3400);
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.add('hidden'), 3400);
 }
 
 function escapeHTML(str) {
     if (!str) return '';
-    return str.replace(/&/g, '&amp;')
+    return String(str).replace(/&/g, '&amp;')
               .replace(/</g, '&lt;')
               .replace(/>/g, '&gt;')
               .replace(/"/g, '&quot;')
               .replace(/'/g, '&#039;');
 }
-
-// 画面サイズを変更した際や半分画面(ハーフスクリーン)にした際も自動で重なりを再計算して被りゼロを維持！
-let resizeTimeout = null;
-window.addEventListener('resize', () => {
-    if (resizeTimeout) clearTimeout(resizeTimeout);
-    resizeTimeout = setTimeout(() => {
-        if (currentView === 'matrix') {
-            renderMatrixGraph();
-        }
-    }, 100);
-});
