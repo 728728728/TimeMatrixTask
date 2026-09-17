@@ -168,6 +168,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     setupEventListeners();
     setupTodayListeners();
     setupBoardEnhancements();
+    setupThemeEditor();
     renderAll();
 
     // ブラウザを閉じて再起動した後も前回の接続ファイルへ自動再接続
@@ -298,7 +299,7 @@ function sanitizeDays(obj) {
 function parseDataPayload(parsed) {
     if (Array.isArray(parsed)) return { tasks: parsed, days: null };
     if (parsed && typeof parsed === 'object' && Array.isArray(parsed.tasks)) {
-        return { tasks: parsed.tasks, days: parsed.days || null };
+        return { tasks: parsed.tasks, days: parsed.days || null, theme: parsed.theme || null };
     }
     return null;
 }
@@ -306,10 +307,14 @@ function parseDataPayload(parsed) {
 function applyDataPayload(payload) {
     tasks = payload.tasks.map((t, idx) => sanitizeTask(t, idx)).filter(Boolean);
     if (payload.days) days = { ...days, ...sanitizeDays(payload.days) };
+    if (payload.theme) {
+        const t = applyTheme(payload.theme);
+        saveTheme(t);
+    }
 }
 
 function buildFilePayload() {
-    return { app: 'TimeMatrixTask', version: 2, savedAt: new Date().toISOString(), tasks, days };
+    return { app: 'TimeMatrixTask', version: 2, savedAt: new Date().toISOString(), tasks, days, theme: loadSavedTheme() };
 }
 
 async function loadTasksWithSafetyFallback() {
@@ -409,8 +414,8 @@ function updateSaveIndicator() {
 
     const badge = document.getElementById('save-status-indicator');
     if (badge) {
-        badge.style.borderColor = '#00f5d4';
-        setTimeout(() => { badge.style.borderColor = 'rgba(0, 245, 212, 0.3)'; }, 1000);
+        badge.style.borderColor = 'var(--accent)';
+        setTimeout(() => { badge.style.borderColor = ''; }, 1000);
     }
 }
 
@@ -643,7 +648,7 @@ function setupEventListeners() {
     // Escで閉じる / n でクイック入力へ
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
-            closeTaskModal(); closeReviewModal(); closeDetailModal(); closeBackupModal();
+            closeTaskModal(); closeReviewModal(); closeDetailModal(); closeBackupModal(); closeThemeModal();
             return;
         }
         const tag = (e.target.tagName || '').toLowerCase();
@@ -1525,6 +1530,93 @@ function saveFormTask() {
     saveTasks();
     closeTaskModal();
     renderAll();
+}
+
+// ==========================================================================
+// Theme editor（色のカスタマイズ。theme.js の関数を使う）
+// ==========================================================================
+const modalTheme = document.getElementById('modal-theme');
+let currentTheme = null;
+
+function setupThemeEditor() {
+    currentTheme = loadSavedTheme() || normalizeTheme({ preset: DEFAULT_PRESET });
+
+    const presetBox = document.getElementById('theme-presets');
+    presetBox.innerHTML = Object.entries(THEME_PRESETS).map(([id, p]) => `
+        <button type="button" class="theme-preset" data-preset="${id}" style="background:${p.bg}; color:${p.text}">
+            <div class="theme-preset-glass" style="background:${p.surface}99">
+                <div class="theme-preset-bar" style="background:linear-gradient(90deg, ${p.accent}, ${p.accent2})"></div>
+                <div class="theme-preset-dots">
+                    <span style="background:${p.q1}"></span><span style="background:${p.q2}"></span>
+                    <span style="background:${p.q3}"></span><span style="background:${p.q4}"></span>
+                </div>
+            </div>
+            <span class="theme-preset-name">${escapeHTML(p.name)}</span>
+        </button>`).join('');
+    presetBox.addEventListener('click', (e) => {
+        const btn = e.target.closest('.theme-preset');
+        if (!btn) return;
+        setTheme({ ...THEME_PRESETS[btn.dataset.preset], preset: btn.dataset.preset });
+    });
+
+    const fieldBox = document.getElementById('theme-fields');
+    fieldBox.innerHTML = THEME_FIELDS.map(f => `
+        <label class="theme-field">
+            <input type="color" data-key="${f.key}">
+            <span class="theme-field-text">
+                <span class="theme-field-label">${escapeHTML(f.label)}</span>
+                <input type="text" data-hex="${f.key}" maxlength="7" spellcheck="false">
+            </span>
+        </label>`).join('');
+    fieldBox.addEventListener('input', (e) => {
+        const key = e.target.dataset.key || e.target.dataset.hex;
+        if (!key) return;
+        const value = e.target.value.trim();
+        if (!hexToRgb(value)) return;
+        setTheme({ ...currentTheme, [key]: value.startsWith('#') ? value : '#' + value, preset: 'custom' }, e.target);
+    });
+
+    document.getElementById('btn-open-theme').addEventListener('click', openThemeModal);
+    document.getElementById('btn-close-theme').addEventListener('click', closeThemeModal);
+    document.getElementById('btn-theme-done').addEventListener('click', closeThemeModal);
+    modalTheme.addEventListener('click', (e) => { if (e.target === modalTheme) closeThemeModal(); });
+    document.getElementById('btn-theme-reset').addEventListener('click', () => {
+        setTheme({ ...THEME_PRESETS[DEFAULT_PRESET], preset: DEFAULT_PRESET });
+    });
+
+    syncThemeEditor();
+}
+
+function setTheme(theme, sourceInput = null) {
+    currentTheme = applyTheme(theme);
+    saveTheme(currentTheme);
+    syncThemeEditor(sourceInput);
+    if (currentView === 'matrix') renderMatrixGraph();
+    clearTimeout(setTheme.fileTimer);
+    // カラーピッカーのドラッグ中に何度も書き込まないよう少し待つ
+    setTheme.fileTimer = setTimeout(() => { if (activeFileHandle) saveToDirectLocalFile(true); }, 800);
+}
+
+function syncThemeEditor(sourceInput = null) {
+    document.querySelectorAll('.theme-preset').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.preset === currentTheme.preset);
+    });
+    document.getElementById('theme-custom-badge').classList.toggle('hidden', currentTheme.preset !== 'custom');
+    THEME_FIELDS.forEach(({ key }) => {
+        const color = document.querySelector(`#theme-fields [data-key="${key}"]`);
+        const hex = document.querySelector(`#theme-fields [data-hex="${key}"]`);
+        if (color !== sourceInput) color.value = currentTheme[key];
+        if (hex !== sourceInput) hex.value = currentTheme[key];
+    });
+}
+
+function openThemeModal() {
+    syncThemeEditor();
+    modalTheme.classList.add('show');
+}
+
+function closeThemeModal() {
+    modalTheme.classList.remove('show');
 }
 
 // ==========================================================================

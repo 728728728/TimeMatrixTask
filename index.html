@@ -12,6 +12,7 @@
     <!-- FontAwesome for Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="style.css">
+    <script src="theme.js"></script>
 </head>
 <body>
     <!-- Background Glow Elements -->
@@ -63,6 +64,10 @@
 
                     <button id="btn-open-backup" class="btn btn-secondary backup-btn" title="バックアップ履歴と復元">
                         <i class="fa-solid fa-clock-rotate-left"></i> <span class="btn-text-sm">データ復元</span>
+                    </button>
+
+                    <button id="btn-open-theme" class="btn btn-icon btn-secondary" title="色を変える">
+                        <i class="fa-solid fa-palette"></i>
                     </button>
 
                     <div class="dropdown">
@@ -739,6 +744,30 @@
                 <button id="btn-write-review" class="btn btn-secondary"><i class="fa-solid fa-pen-nib"></i> ふりかえり</button>
                 <button id="btn-edit-from-detail" class="btn btn-secondary"><i class="fa-solid fa-pen"></i> 編集</button>
                 <button id="btn-delete-task" class="btn btn-danger"><i class="fa-solid fa-trash"></i> 削除</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==========================================================================
+         THEME MODAL（色のカスタマイズ）
+         ========================================================================== -->
+    <div id="modal-theme" class="modal-overlay">
+        <div class="modal-card theme-card">
+            <div class="modal-top-bar">
+                <span class="modal-top-title"><i class="fa-solid fa-palette text-q2"></i> 色を変える</span>
+                <button class="btn-close" id="btn-close-theme" title="閉じる"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <p class="theme-intro">変更はすぐに反映・保存されます。ガラスの透け感はそのまま、色だけが変わります。</p>
+
+            <h4 class="theme-section-title">プリセット</h4>
+            <div class="theme-presets" id="theme-presets"></div>
+
+            <h4 class="theme-section-title">自分で調整 <span class="theme-custom-badge hidden" id="theme-custom-badge">カスタム</span></h4>
+            <div class="theme-fields" id="theme-fields"></div>
+
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" id="btn-theme-reset"><i class="fa-solid fa-rotate-left"></i> 標準に戻す</button>
+                <button type="button" class="btn btn-primary" id="btn-theme-done"><i class="fa-solid fa-check"></i> 完了</button>
             </div>
         </div>
     </div>
