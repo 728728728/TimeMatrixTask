@@ -1935,3 +1935,5 @@ input[type="text"]:focus, input[type="datetime-local"]:focus, select:focus, text
 
 body.dock-pushes .app-container { padding-right: 368px; }
 @media (max-width: 1099px) { body.dock-pushes .app-container { padding-right: 24px; } }
+
+.today-dock:not(.in-pip) .dock-date { display: none; }

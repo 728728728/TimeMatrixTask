@@ -1205,6 +1205,7 @@ function setupDock() {
     dockState = loadDockState();
 
     dq('#btn-dock-collapse').addEventListener('click', () => {
+        if (isDockDetached()) return; // 別ウィンドウ中はたためない
         dockState.collapsed = !dockState.collapsed;
         saveDockState();
         renderDock();
@@ -1287,6 +1288,8 @@ function renderDock() {
     dq('#dock-progress-fill').style.width =
         todayTasks.length ? `${Math.round(done / todayTasks.length * 100)}%` : '0%';
 
+    dq('#dock-date').textContent = formatDayLabel(key);
+
     const focusBox = dq('#dock-focus');
     focusBox.classList.toggle('hidden', !rec.focus);
     if (rec.focus) focusBox.innerHTML = `<small>今日いちばん大事なこと</small>${escapeHTML(rec.focus)}`;
@@ -1353,7 +1356,7 @@ async function toggleDockPip() {
 }
 
 function attachDockToWindow(win) {
-    copyStylesToWindow(win);
+    injectWindowStyles(win);
     win.document.title = '今日やること';
     win.document.body.classList.add('pip-body');
 
@@ -1369,29 +1372,266 @@ function attachDockToWindow(win) {
     });
 }
 
-function copyStylesToWindow(win) {
-    // 自前のCSSは中身をその場でコピーする（<link>は読み込み待ちの間だけ無装飾になるため）
-    const inline = win.document.createElement('style');
-    try {
-        inline.textContent = [...document.styleSheets]
-            .filter(sheet => !sheet.href || sheet.href.startsWith(location.origin))
-            .map(sheet => [...sheet.cssRules].map(rule => rule.cssText).join('\n'))
-            .join('\n');
-    } catch (e) {
-        console.warn('Could not inline styles:', e);
-    }
-    win.document.head.append(inline);
+// 小窓に流し込む専用スタイル。
+// file:// で開いた場合、ブラウザの制限で style.css の中身を読み出せないため、
+// 外部CSS・アイコンフォントに一切頼らない自己完結したデザインにしている。
+const WINDOW_THEME_VARS = [
+    '--bg-rgb', '--surface-rgb', '--surface-hi-rgb', '--surface-lo-rgb',
+    '--ink-rgb', '--shade-rgb', '--text-rgb', '--accent-rgb', '--accent-2-rgb',
+    '--q1-rgb', '--q2-rgb', '--q3-rgb', '--q4-rgb',
+    '--text-secondary', '--text-muted', '--on-accent'
+];
 
-    // フォントやアイコン（CDN）は <link> をそのまま複製する
-    document.querySelectorAll('link[rel="stylesheet"], link[rel="preconnect"]').forEach(node => {
-        if (node.href.startsWith(location.origin)) return;
-        const link = win.document.createElement('link');
-        link.rel = node.rel;
-        link.href = node.href;
-        if (node.crossOrigin) link.crossOrigin = node.crossOrigin;
-        win.document.head.append(link);
-    });
-    syncThemeTo(win);
+function themeVarsCSS() {
+    const cs = getComputedStyle(document.documentElement);
+    const body = WINDOW_THEME_VARS
+        .map(name => `  ${name}: ${cs.getPropertyValue(name).trim()};`)
+        .join('\n');
+    return `:root {\n${body}\n}`;
+}
+
+const DOCK_WINDOW_CSS = `
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; }
+body.pip-body {
+    background:
+        radial-gradient(circle at 15% -10%, rgba(var(--accent-rgb), 0.18), transparent 55%),
+        radial-gradient(circle at 110% 10%, rgba(var(--q1-rgb), 0.14), transparent 55%),
+        rgb(var(--bg-rgb));
+    color: rgb(var(--text-rgb));
+    font-family: 'Noto Sans JP', 'Yu Gothic UI', 'Meiryo', -apple-system, 'Segoe UI', sans-serif;
+    font-size: 13px;
+    line-height: 1.5;
+    overflow: hidden;
+}
+.hidden { display: none !important; }
+button { font: inherit; cursor: pointer; }
+input { font: inherit; }
+
+.today-dock {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+}
+
+/* 見出し */
+.dock-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 12px 12px 10px;
+    background: rgba(var(--surface-rgb), 0.55);
+    border-bottom: 1px solid rgba(var(--ink-rgb), 0.12);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+}
+.dock-caret { display: none; }
+.dock-pill-btn {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: none;
+    border: none;
+    color: rgb(var(--text-rgb));
+    font-size: 14px;
+    font-weight: 700;
+    text-align: left;
+    cursor: default;
+    padding: 0;
+}
+.dock-count {
+    margin-left: auto;
+    font-size: 12px;
+    font-weight: 800;
+    color: rgb(var(--accent-rgb));
+    background: rgba(var(--accent-rgb), 0.16);
+    padding: 3px 10px;
+    border-radius: 999px;
+    white-space: nowrap;
+}
+.dock-head-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.dock-icon-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    background: none;
+    color: rgb(var(--text-rgb));
+    opacity: 0.55;
+    font-size: 13px;
+    line-height: 1;
+    transition: all 0.15s ease;
+}
+.dock-icon-btn:hover { opacity: 1; background: rgba(var(--ink-rgb), 0.12); }
+/* アイコンフォントを使わず、記号だけで表す */
+.dock-icon-btn i { display: none; }
+#btn-dock-pip::after { content: '\\21F1'; }
+#btn-dock-close::after { content: '\\2715'; }
+
+.dock-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px;
+    overflow: hidden;
+}
+
+.dock-date { font-size: 11px; font-weight: 700; color: var(--text-muted); letter-spacing: 0.04em; }
+
+.dock-progress { height: 5px; background: rgba(var(--ink-rgb), 0.12); border-radius: 999px; overflow: hidden; flex-shrink: 0; }
+.dock-progress-fill {
+    height: 100%;
+    width: 0;
+    border-radius: 999px;
+    background: linear-gradient(90deg, rgb(var(--accent-rgb)), rgb(var(--accent-2-rgb)));
+    transition: width 0.4s ease;
+}
+
+.dock-focus {
+    background: rgba(var(--q3-rgb), 0.14);
+    border: 1px solid rgba(var(--q3-rgb), 0.42);
+    border-radius: 10px;
+    padding: 8px 10px;
+    font-size: 13px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+.dock-focus small { display: block; color: rgb(var(--q3-rgb)); font-size: 10px; font-weight: 700; margin-bottom: 2px; }
+
+/* リスト（ここだけスクロールし、追加欄は常に下に残る） */
+.dock-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: 2px;
+}
+.item-empty { list-style: none; font-size: 12px; color: var(--text-muted); padding: 14px 4px; text-align: center; line-height: 1.7; }
+
+.item-row {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 9px 10px;
+    border-radius: 10px;
+    background: rgba(var(--surface-rgb), 0.6);
+    border: 1px solid rgba(var(--ink-rgb), 0.1);
+    border-left: 3px solid var(--row-color, rgba(var(--ink-rgb), 0.3));
+    min-width: 0;
+}
+.item-row.q1 { --row-color: rgb(var(--q1-rgb)); }
+.item-row.q2 { --row-color: rgb(var(--q2-rgb)); }
+.item-row.q3 { --row-color: rgb(var(--q3-rgb)); }
+.item-row.q4 { --row-color: rgb(var(--q4-rgb)); }
+.item-row.done { background: rgba(var(--surface-rgb), 0.3); border-left-color: rgba(var(--ink-rgb), 0.25); }
+
+.check-btn {
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    border: 2px solid var(--row-color, rgba(var(--ink-rgb), 0.4));
+    background: none;
+    color: transparent;
+    font-size: 12px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
+}
+.check-btn i { display: none; }
+.check-btn::after { content: '\\2713'; font-weight: 900; }
+.check-btn:hover { background: rgba(var(--ink-rgb), 0.12); color: var(--text-muted); }
+.item-row.done .check-btn { background: var(--row-color); color: var(--on-accent); border-color: var(--row-color); }
+
+.item-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; cursor: pointer; }
+.item-title { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.item-row.done .item-title { text-decoration: line-through; color: var(--text-muted); font-weight: 500; }
+.item-sub { font-size: 10px; color: var(--text-muted); display: flex; gap: 7px; flex-wrap: wrap; }
+.item-sub:empty { display: none; }
+.item-sub .warn { color: rgb(var(--q1-rgb)); font-weight: 700; }
+.item-sub i { display: none; }
+.chain-icon { display: none; }
+.item-title .chain-icon + * { margin-left: 0; }
+
+.item-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.mini-btn {
+    background: rgba(var(--ink-rgb), 0.08);
+    border: 1px solid rgba(var(--ink-rgb), 0.16);
+    color: rgb(var(--text-rgb));
+    opacity: 0.8;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 4px 8px;
+    border-radius: 7px;
+    white-space: nowrap;
+    transition: all 0.15s ease;
+}
+.mini-btn:hover { opacity: 1; background: rgba(var(--accent-rgb), 0.18); border-color: rgba(var(--accent-rgb), 0.5); }
+
+/* 次にやること */
+.followup-row { list-style: none; display: flex; align-items: center; gap: 7px; padding-left: 14px; }
+.followup-row > i { display: none; }
+.followup-row::before { content: '\\21B3'; color: rgb(var(--accent-rgb)); font-size: 13px; flex-shrink: 0; }
+.followup-input {
+    flex: 1;
+    min-width: 0;
+    background: rgba(var(--shade-rgb), 0.3);
+    border: 1px solid rgba(var(--accent-rgb), 0.5);
+    border-radius: 8px;
+    color: rgb(var(--text-rgb));
+    font-size: 12px;
+    padding: 7px 9px;
+    outline: none;
+}
+
+/* 追加欄 */
+.dock-add {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 10px;
+    border: 1px solid rgba(var(--ink-rgb), 0.18);
+    border-radius: 10px;
+    background: rgba(var(--shade-rgb), 0.28);
+    flex-shrink: 0;
+}
+.dock-add i { display: none; }
+.dock-add::before { content: '\\FF0B'; color: var(--text-muted); font-size: 13px; }
+.dock-add input {
+    flex: 1;
+    min-width: 0;
+    background: none;
+    border: none;
+    outline: none;
+    color: rgb(var(--text-rgb));
+    font-size: 13px;
+    padding: 10px 0;
+}
+.dock-add:focus-within { border-color: rgb(var(--accent-rgb)); background: rgba(var(--shade-rgb), 0.4); }
+
+/* スクロールバー */
+.dock-list::-webkit-scrollbar { width: 8px; }
+.dock-list::-webkit-scrollbar-thumb { background: rgba(var(--ink-rgb), 0.22); border-radius: 999px; }
+.dock-list::-webkit-scrollbar-track { background: transparent; }
+`;
+
+function injectWindowStyles(win) {
+    const vars = win.document.createElement('style');
+    vars.id = 'tmt-window-vars';
+    vars.textContent = themeVarsCSS();
+    const base = win.document.createElement('style');
+    base.textContent = DOCK_WINDOW_CSS;
+    win.document.head.append(vars, base);
 }
 
 // テーマ（CSS変数）の変更を別ウィンドウにも反映する
@@ -1401,9 +1641,9 @@ function syncPipTheme() {
 }
 
 function syncThemeTo(win) {
-    if (!win || !win.document || !win.document.documentElement) return;
-    win.document.documentElement.style.cssText = document.documentElement.style.cssText;
-    win.document.documentElement.dataset.themeMode = document.documentElement.dataset.themeMode || '';
+    if (!win || !win.document) return;
+    const vars = win.document.getElementById('tmt-window-vars');
+    if (vars) vars.textContent = themeVarsCSS();
 }
 
 // ==========================================================================
