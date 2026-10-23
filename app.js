@@ -2496,6 +2496,8 @@ async function initAndRestoreDirectFileSync() {
                 renderAll();
                 showToast(`⚡ 「${file.name}」と同期しました`);
             }
+            await rememberFileStamp();
+            startFileWatch();
         } else {
             showToast(`⚡ 前回のファイル「${activeFileHandle.name}」があります。上部のバッジをクリックで再接続`);
         }
@@ -2514,6 +2516,7 @@ async function verifyOrRequestPermission(handle, forcePrompt = false) {
         }
         if ((await handle.requestPermission(opts)) === 'granted') {
             updateFileSyncUI();
+            startFileWatch();
             try {
                 const { payload } = await readPayloadFromHandle(handle);
                 if (payload && payload.tasks.length >= tasks.length) {
@@ -2570,6 +2573,7 @@ async function linkLocalFileDirectly() {
         });
         activeFileHandle = handle;
         await saveFileHandleToIDB(handle);
+        startFileWatch();
 
         try {
             const { file, payload } = await readPayloadFromHandle(handle);
@@ -2620,6 +2624,7 @@ async function saveToDirectLocalFile(silent = false) {
         const writable = await activeFileHandle.createWritable();
         await writable.write(JSON.stringify(buildFilePayload(), null, 2));
         await writable.close();
+        await rememberFileStamp();
         updateFileSyncUI();
         if (!silent) showToast(`💾 「${activeFileHandle.name}」へ保存しました`);
     } catch (e) {
@@ -2629,6 +2634,47 @@ async function saveToDirectLocalFile(silent = false) {
         }
     } finally {
         isSyncingFile = false;
+    }
+}
+
+// ---- ファイルの外部変更を取り込む ----
+// デスクトップの小窓（today_widget.pyw）が書き換えたら、こちらも追従する
+let lastFileStamp = 0;
+let fileWatchTimer = null;
+
+async function rememberFileStamp() {
+    if (!activeFileHandle) return;
+    try {
+        const file = await activeFileHandle.getFile();
+        lastFileStamp = file.lastModified;
+    } catch (e) { /* 権限がなければ次の機会に */ }
+}
+
+function startFileWatch() {
+    if (fileWatchTimer) return;
+    fileWatchTimer = setInterval(checkFileForExternalChanges, 2500);
+}
+
+async function checkFileForExternalChanges() {
+    if (!activeFileHandle || isSyncingFile || document.hidden) return;
+    try {
+        if ((await activeFileHandle.queryPermission({ mode: 'readwrite' })) !== 'granted') return;
+        const file = await activeFileHandle.getFile();
+        if (!lastFileStamp) { lastFileStamp = file.lastModified; return; }
+        if (file.lastModified <= lastFileStamp) return;
+
+        const text = await file.text();
+        if (!text.trim()) return;
+        const payload = parseDataPayload(JSON.parse(text));
+        if (!payload) return;
+
+        lastFileStamp = file.lastModified;
+        applyDataPayload(payload);
+        saveTasks(true, true); // ブラウザ内の控えにも反映（ファイルへは書き戻さない）
+        renderAll();
+        showToast('小窓での変更を取り込みました');
+    } catch (e) {
+        console.warn('File watch error:', e);
     }
 }
 

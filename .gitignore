@@ -11,3 +11,9 @@ node_modules/
 
 # File System Access API swap files
 *.crswap
+
+# Widget local state
+.widget_state.json
+tasks_data.json.bak
+__pycache__/
+*.bak
