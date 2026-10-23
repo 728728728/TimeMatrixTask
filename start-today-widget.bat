@@ -1,3 +1,33 @@
 @echo off
-rem ä»Šæ—¥ã‚„ã‚‹ã“ã¨ãƒ»ãƒ‡ã‚¹ã‚¯ãƒˆãƒƒãƒ—ã‚¦ã‚£ã‚¸ã‚§ãƒƒãƒˆã‚’èµ·å‹•ã™ã‚‹ï¼ˆã‚³ãƒ³ã‚½ãƒ¼ãƒ«ã¯å‡ºã¾ã›ã‚“ï¼‰
-start "" pythonw "%~dp0today_widget.pyw"
+rem ¡“ú‚â‚é‚±‚ÆEƒfƒXƒNƒgƒbƒvƒEƒBƒWƒFƒbƒg‚ğ‹N“®‚·‚éi‰æ–Ê‚É¬‘‹‚ªo‚Ü‚·j
+setlocal
+@echo off
+rem --- Python(pythonw) ‚ğ’T‚·BMicrosoft Store ‚Ìƒ_ƒ~[‚Íg‚í‚È‚¢ ---
+set "PYW="
+
+if exist "%LOCALAPPDATA%\Python\bin\pythonw.exe" set "PYW=%LOCALAPPDATA%\Python\bin\pythonw.exe"
+
+if not defined PYW for /d %%D in ("%LOCALAPPDATA%\Programs\Python\Python3*") do if exist "%%D\pythonw.exe" set "PYW=%%D\pythonw.exe"
+if not defined PYW for /d %%D in ("%ProgramFiles%\Python3*") do if exist "%%D\pythonw.exe" set "PYW=%%D\pythonw.exe"
+if not defined PYW for /d %%D in ("C:\Python3*") do if exist "%%D\pythonw.exe" set "PYW=%%D\pythonw.exe"
+
+if not defined PYW (
+  for /f "delims=" %%P in ('where pythonw.exe 2^>nul') do (
+    if not defined PYW (
+      echo %%P | findstr /i /c:"WindowsApps" >nul
+      if errorlevel 1 set "PYW=%%P"
+    )
+  )
+)
+
+if not defined PYW (
+  echo.
+  echo Python ‚ªŒ©‚Â‚©‚è‚Ü‚¹‚ñ‚Å‚µ‚½B
+  echo python.org ”Å‚Ì Python ‚ğ“ü‚ê‚Ä‚©‚çA‚à‚¤ˆê“x‚¨‚µ‚­‚¾‚³‚¢B
+  echo.
+  pause
+  exit /b 1
+)
+
+start "" "%PYW%" "%~dp0today_widget.pyw"
+exit /b 0
