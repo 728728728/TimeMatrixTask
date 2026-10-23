@@ -661,9 +661,13 @@ function setupEventListeners() {
         }
         const tag = (e.target.tagName || '').toLowerCase();
         const typing = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable;
-        if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && e.key === 'n' && !document.querySelector('.modal-overlay.show')) {
+        if (typing || e.ctrlKey || e.metaKey || e.altKey || document.querySelector('.modal-overlay.show')) return;
+        if (e.key === 'n') {
             e.preventDefault();
             btnAddTask.click();
+        } else if (e.key === 'd') {
+            e.preventDefault();
+            toggleDockPip();
         }
     });
 
@@ -1186,15 +1190,15 @@ function renderToday() {
 //   - 画面の右上に常に出しておける（たたむ／閉じるが可能）
 //   - 対応ブラウザでは「最前面の小窓」に出して、他のアプリの上に置ける
 // ==========================================================================
-const DOCK_KEY = 'tmt_dock_v1';
+const DOCK_KEY = 'tmt_dock_v2';
 
 function loadDockState() {
     try {
         const raw = localStorage.getItem(DOCK_KEY);
         if (raw) return { hidden: false, collapsed: false, ...JSON.parse(raw) };
     } catch (e) {}
-    // 初回はスマホだけたたんだ状態で出す
-    return { hidden: false, collapsed: window.innerWidth <= 768 };
+    // 既定はページ内に出さない（小窓を開け閉めする使い方を標準にする）
+    return { hidden: true, collapsed: false };
 }
 
 function saveDockState() {
@@ -1219,7 +1223,7 @@ function setupDock() {
         dockState.hidden = true;
         saveDockState();
         renderDock();
-        showToast('パネルを閉じました（ヘッダーのリストボタンで戻せます）');
+        showToast('パネルを閉じました（メニュー「ページ内にもパネルを出す」で戻せます）');
     });
 
     dq('#btn-dock-pip').addEventListener('click', toggleDockPip);
@@ -1241,7 +1245,15 @@ function setupDock() {
     window.addEventListener('scroll', positionDock, { passive: true });
     window.addEventListener('resize', positionDock);
 
-    document.getElementById('btn-toggle-dock').addEventListener('click', () => {
+    // ヘッダーのボタンは「小窓を開く / 閉じる」
+    document.getElementById('btn-toggle-dock').addEventListener('click', toggleDockPip);
+
+    // ページ内に出すかどうかはメニューから
+    document.getElementById('btn-menu-dock-panel').addEventListener('click', () => {
+        if (isDockDetached()) {
+            showToast('小窓を閉じてから切り替えてください');
+            return;
+        }
         dockState.hidden = !dockState.hidden;
         if (!dockState.hidden) dockState.collapsed = false;
         saveDockState();
@@ -1282,7 +1294,12 @@ function renderDock() {
 
     dockEl.classList.toggle('hidden', dockState.hidden && !detached);
     dockEl.classList.toggle('collapsed', dockState.collapsed && !detached);
-    document.getElementById('btn-toggle-dock').classList.toggle('active', !dockState.hidden);
+    const toggleBtn = document.getElementById('btn-toggle-dock');
+    toggleBtn.classList.toggle('active', detached);
+    toggleBtn.title = detached ? '小窓を閉じる（D）' : '今日やることを小窓で開く（D）';
+    document.getElementById('btn-menu-dock-panel').innerHTML = dockState.hidden
+        ? '<i class="fa-solid fa-table-columns text-q2"></i> ページ内にもパネルを出す'
+        : '<i class="fa-solid fa-table-columns text-q2"></i> ページ内のパネルを閉じる';
 
     dq('#dock-count').textContent = `${done} / ${todayTasks.length}`;
     dq('#dock-progress-fill').style.width =
@@ -1337,7 +1354,7 @@ async function toggleDockPip() {
         try {
             const pip = await window.documentPictureInPicture.requestWindow({ width: 360, height: 480 });
             attachDockToWindow(pip);
-            showToast('最前面の小窓に表示しました');
+            showToast('最前面の小窓で開きました（D キーで開閉できます）');
             return;
         } catch (e) {
             console.warn('PiP unavailable, falling back to popup:', e);
@@ -1345,7 +1362,12 @@ async function toggleDockPip() {
     }
     const popup = window.open('', 'tmt-today-dock', 'popup=yes,width=380,height=560');
     if (!popup) {
-        showToast('小窓を開けませんでした（ポップアップがブロックされていないか確認してください）');
+        // 小窓が開けない環境では、せめてページ内のパネルを出す
+        dockState.hidden = false;
+        dockState.collapsed = false;
+        saveDockState();
+        renderDock();
+        showToast('小窓を開けなかったので、ページ内にパネルを出しました');
         return;
     }
     popup.document.write('<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"></head><body></body></html>');
