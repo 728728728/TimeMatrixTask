@@ -66,6 +66,10 @@
                         <i class="fa-solid fa-clock-rotate-left"></i> <span class="btn-text-sm">データ復元</span>
                     </button>
 
+                    <button id="btn-toggle-dock" class="btn btn-icon btn-secondary" title="今日やることパネルの表示/非表示">
+                        <i class="fa-solid fa-list-check"></i>
+                    </button>
+
                     <button id="btn-open-theme" class="btn btn-icon btn-secondary" title="色を変える">
                         <i class="fa-solid fa-palette"></i>
                     </button>
@@ -769,6 +773,36 @@
                 <button type="button" class="btn btn-secondary" id="btn-theme-reset"><i class="fa-solid fa-rotate-left"></i> 標準に戻す</button>
                 <button type="button" class="btn btn-primary" id="btn-theme-done"><i class="fa-solid fa-check"></i> 完了</button>
             </div>
+        </div>
+    </div>
+
+    <!-- ==========================================================================
+         今日やること・フローティングドック（常時表示／最前面の別ウィンドウにもできる）
+         ========================================================================== -->
+    <div id="today-dock" class="today-dock">
+        <div class="dock-head">
+            <button type="button" class="dock-pill-btn" id="btn-dock-collapse" title="開く／たたむ">
+                <i class="fa-solid fa-chevron-down dock-caret"></i>
+                <span class="dock-title">今日やること</span>
+                <span class="dock-count" id="dock-count">0 / 0</span>
+            </button>
+            <div class="dock-head-actions">
+                <button type="button" class="dock-icon-btn" id="btn-dock-pip" title="最前面の小窓で表示">
+                    <i class="fa-solid fa-window-restore"></i>
+                </button>
+                <button type="button" class="dock-icon-btn" id="btn-dock-close" title="パネルを閉じる">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+        </div>
+        <div class="dock-body" id="dock-body">
+            <div class="dock-progress"><div class="dock-progress-fill" id="dock-progress-fill"></div></div>
+            <div class="dock-focus hidden" id="dock-focus"></div>
+            <ul class="item-list dock-list" id="dock-list"></ul>
+            <form class="dock-add" id="dock-add-form" autocomplete="off">
+                <i class="fa-solid fa-plus"></i>
+                <input type="text" id="dock-add-input" placeholder="今日やることを追加（Enter）">
+            </form>
         </div>
     </div>
 

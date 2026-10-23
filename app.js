@@ -131,6 +131,8 @@ let morningExpanded = false;
 let eveningExpanded = false;
 let showAllCandidates = false;
 let renderedDayKey = null;
+let followUp = null; // { id, host } 「次にやること」入力を出している場所
+let dockState = { hidden: false, collapsed: false };
 
 // DOM Elements
 const navTabs = document.querySelectorAll('.nav-tab');
@@ -158,6 +160,10 @@ const liveQuadrantBadge = document.getElementById('live-quadrant-badge');
 
 const quickAddInput = document.getElementById('quick-add-input');
 
+// ドックは最前面ウィンドウへ移動することがあるので、要素を保持して中を querySelector する
+const dockEl = document.getElementById('today-dock');
+const dq = (sel) => dockEl.querySelector(sel);
+
 // ==========================================================================
 // Initialization
 // ==========================================================================
@@ -169,6 +175,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     setupTodayListeners();
     setupBoardEnhancements();
     setupThemeEditor();
+    setupDock();
     renderAll();
 
     // ブラウザを閉じて再起動した後も前回の接続ファイルへ自動再接続
@@ -282,6 +289,7 @@ function sanitizeTask(t, idx = 0) {
         today: typeof t.today === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(t.today) ? t.today : null,
         pdcaStrategy: sanitizeStrategy(t.pdcaStrategy),
         pdcaReview: (review && (review.result || review.action)) ? review : null,
+        parentId: t.parentId ? String(t.parentId) : null,
         createdAt: Number.isFinite(Number(t.createdAt)) ? Number(t.createdAt) : Date.now()
     };
 }
@@ -678,7 +686,10 @@ function setupEventListeners() {
         }, 100);
     });
 
-    window.addEventListener('beforeunload', () => saveTasks(true));
+    window.addEventListener('beforeunload', () => {
+        saveTasks(true);
+        closeDockWindow();
+    });
 }
 
 function toggleComplete(task) {
@@ -833,7 +844,7 @@ function setupTodayListeners() {
 
     // 各リストのボタン（イベント委譲）
     ['inbox-list', 'candidate-list', 'today-list', 'evening-left-list'].forEach(id => {
-        document.getElementById(id).addEventListener('click', onItemListClick);
+        attachTaskListHandlers(document.getElementById(id));
     });
 }
 
@@ -864,7 +875,15 @@ function onItemListClick(e) {
         showToast('明日に回しました');
     } else if (act === 'check') {
         setTaskCompleted(task, !task.completed);
-        if (task.completed) showToast(`✅ 「${task.title.slice(0, 20)}」完了！`);
+        if (task.completed) {
+            showToast(`✅ 「${task.title.slice(0, 20)}」完了！`);
+            // 終わったら次の課題が出てくることが多いので、その場で書けるようにする
+            followUp = { id: task.id, host: hostOfList(row) };
+        } else if (followUp && followUp.id === task.id) {
+            followUp = null;
+        }
+    } else if (act === 'followup') {
+        followUp = (followUp && followUp.id === task.id) ? null : { id: task.id, host: hostOfList(row) };
     } else if (act === 'delete') {
         if (!confirm(`「${task.title}」を削除しますか？`)) return;
         tasks = tasks.filter(t => t.id !== task.id);
@@ -873,6 +892,10 @@ function onItemListClick(e) {
     }
     saveTasks();
     renderAll();
+}
+
+function hostOfList(row) {
+    return row.closest('#dock-list') ? 'dock' : 'today';
 }
 
 function countDoneOn(key) {
@@ -909,15 +932,96 @@ function itemRowHTML(task, opts) {
     if (opts.showQuadrant && q) subs.push(`<span>第${QUADRANT_SHORT[q]}</span>`);
     if (opts.carry) subs.push(`<span class="carry">持ち越し</span>`);
     if (dl && !task.completed) subs.push(`<span class="${dl.warn ? 'warn' : ''}"><i class="fa-regular fa-clock"></i> ${dl.label}</span>`);
+
+    const parent = task.parentId ? findTask(task.parentId) : null;
+    const chain = parent ? `<i class="fa-solid fa-arrow-turn-down chain-icon" title="「${escapeHTML(parent.title)}」の次"></i> ` : '';
+    const actions = (opts.actions || '') +
+        (opts.followUp && !task.completed
+            ? `<button type="button" class="mini-btn" data-act="followup" title="このタスクの次にやることを追加">＋次</button>`
+            : '');
+
     return `
         <li class="item-row ${q} ${opts.inbox ? 'inbox' : ''} ${task.completed ? 'done' : ''}" data-id="${escapeHTML(task.id)}">
             ${opts.check ? `<button type="button" class="check-btn" data-act="check" title="${task.completed ? '未完了に戻す' : '完了にする'}"><i class="fa-solid fa-check"></i></button>` : ''}
             <div class="item-main">
-                <span class="item-title">${escapeHTML(task.title)}</span>
+                <span class="item-title">${chain}${escapeHTML(task.title)}</span>
                 <span class="item-sub">${subs.join('')}</span>
             </div>
-            <div class="item-actions">${opts.actions}</div>
+            <div class="item-actions">${actions}</div>
         </li>`;
+}
+
+// 「次にやること」の入力行。完了直後や ＋次 ボタンで、そのタスクの下に出す
+function followUpRowHTML(task, host) {
+    if (!followUp || followUp.id !== task.id || followUp.host !== host) return '';
+    return `
+        <li class="followup-row">
+            <i class="fa-solid fa-arrow-turn-down"></i>
+            <input type="text" class="followup-input" data-parent="${escapeHTML(task.id)}"
+                   placeholder="次にやること（Enterで今日に追加 / Escで閉じる）">
+        </li>`;
+}
+
+function taskRowsHTML(list, host, opts) {
+    return list.map(t => itemRowHTML(t, opts(t)) + followUpRowHTML(t, host)).join('');
+}
+
+// 再描画のたびに、入力中だった「次にやること」欄へフォーカスを戻す
+function restoreFollowUpFocus(container) {
+    if (!followUp) return;
+    const input = container.querySelector('.followup-input');
+    if (input && input.ownerDocument.activeElement !== input) input.focus();
+}
+
+function addFollowUpTask(parent, title) {
+    const task = createTask(title.slice(0, 150), parent.inbox ? '' : taskQuadrant(parent), true);
+    task.category = parent.category;
+    task.parentId = parent.id;
+    task.deadline = parent.deadline;
+    tasks.unshift(task);
+    saveTasks();
+    showToast(`「${title.slice(0, 20)}」を今日やることに追加しました`);
+}
+
+// 「次にやること」欄のキー操作（Enterで追加、Escで閉じる）。各リストで共有
+function onFollowUpKeydown(e) {
+    const input = e.target.closest('.followup-input');
+    if (!input) return;
+    if (e.key === 'Escape') {
+        followUp = null;
+        renderAll();
+        return;
+    }
+    if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229) return;
+    e.preventDefault();
+    const parent = findTask(input.dataset.parent);
+    const title = input.value.trim();
+    if (!parent || !title) {
+        followUp = null;
+        renderAll();
+        return;
+    }
+    addFollowUpTask(parent, title);
+    input.value = '';
+    renderAll();
+}
+
+// 空のまま他へ移ったら閉じる（入力済みなら残す）
+function onFollowUpFocusOut(e) {
+    const input = e.target.closest('.followup-input');
+    if (!input || input.value.trim()) return;
+    setTimeout(() => {
+        if (!followUp || !input.isConnected) return;
+        if (input.ownerDocument.activeElement === input) return;
+        followUp = null;
+        renderAll();
+    }, 120);
+}
+
+function attachTaskListHandlers(container) {
+    container.addEventListener('click', onItemListClick);
+    container.addEventListener('keydown', onFollowUpKeydown);
+    container.addEventListener('focusout', onFollowUpFocusOut);
 }
 
 function renderToday() {
@@ -1011,13 +1115,16 @@ function renderToday() {
         (a.completed - b.completed) ||
         QUADRANT_ORDER[taskQuadrant(a)] - QUADRANT_ORDER[taskQuadrant(b)]
     );
-    document.getElementById('today-list').innerHTML = sortedToday.length === 0
+    const todayListEl = document.getElementById('today-list');
+    todayListEl.innerHTML = sortedToday.length === 0
         ? '<li class="item-empty">まだありません。朝の確認で選ぶか、「今日やる」にチェックして追加してください。</li>'
-        : sortedToday.map(t => itemRowHTML(t, {
+        : taskRowsHTML(sortedToday, 'today', (t) => ({
             check: true,
             showQuadrant: true,
+            followUp: true,
             actions: t.completed ? '' : `<button type="button" class="mini-btn icon" data-act="untoday" title="今日やることから外す"><i class="fa-solid fa-xmark"></i></button>`
-        })).join('');
+        }));
+    restoreFollowUpFocus(todayListEl);
     const doneCount = todayTasks.length - leftTasks.length;
     document.getElementById('today-progress-text').textContent = `${doneCount} / ${todayTasks.length}`;
     document.getElementById('today-progress-fill').style.width =
@@ -1075,6 +1182,231 @@ function renderToday() {
 }
 
 // ==========================================================================
+// 今日やること・フローティングドック
+//   - 画面の右上に常に出しておける（たたむ／閉じるが可能）
+//   - 対応ブラウザでは「最前面の小窓」に出して、他のアプリの上に置ける
+// ==========================================================================
+const DOCK_KEY = 'tmt_dock_v1';
+
+function loadDockState() {
+    try {
+        const raw = localStorage.getItem(DOCK_KEY);
+        if (raw) return { hidden: false, collapsed: false, ...JSON.parse(raw) };
+    } catch (e) {}
+    // 初回はスマホだけたたんだ状態で出す
+    return { hidden: false, collapsed: window.innerWidth <= 768 };
+}
+
+function saveDockState() {
+    try { localStorage.setItem(DOCK_KEY, JSON.stringify(dockState)); } catch (e) {}
+}
+
+function setupDock() {
+    dockState = loadDockState();
+
+    dq('#btn-dock-collapse').addEventListener('click', () => {
+        dockState.collapsed = !dockState.collapsed;
+        saveDockState();
+        renderDock();
+    });
+
+    dq('#btn-dock-close').addEventListener('click', () => {
+        if (isDockDetached()) {
+            closeDockWindow();
+            return;
+        }
+        dockState.hidden = true;
+        saveDockState();
+        renderDock();
+        showToast('パネルを閉じました（ヘッダーのリストボタンで戻せます）');
+    });
+
+    dq('#btn-dock-pip').addEventListener('click', toggleDockPip);
+
+    dq('#dock-add-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const input = dq('#dock-add-input');
+        const title = input.value.trim();
+        if (!title) return;
+        tasks.unshift(createTask(title.slice(0, 150), '', true));
+        saveTasks();
+        input.value = '';
+        renderAll();
+        input.focus();
+    });
+
+    attachTaskListHandlers(dq('#dock-list'));
+
+    window.addEventListener('scroll', positionDock, { passive: true });
+    window.addEventListener('resize', positionDock);
+
+    document.getElementById('btn-toggle-dock').addEventListener('click', () => {
+        dockState.hidden = !dockState.hidden;
+        if (!dockState.hidden) dockState.collapsed = false;
+        saveDockState();
+        renderDock();
+    });
+}
+
+// 広い画面では本文の右に余白を作り、ドックと重ならないようにする
+function updateDockLayout() {
+    const pushes = !isDockDetached() && !dockState.hidden && !dockState.collapsed && window.innerWidth >= 1100;
+    document.body.classList.toggle('dock-pushes', pushes);
+}
+
+// ヘッダーのボタンを隠さないよう、ヘッダーの真下に置く（スクロールしたら上へ）
+function positionDock() {
+    updateDockLayout();
+    if (isDockDetached()) {
+        dockEl.style.top = '';
+        return;
+    }
+    // 狭い画面では画面下に固定する（位置は CSS 側）
+    if (window.innerWidth <= 900) {
+        dockEl.style.top = '';
+        return;
+    }
+    const header = document.querySelector('.app-header');
+    const top = header ? Math.max(12, header.getBoundingClientRect().bottom + 12) : 12;
+    dockEl.style.top = `${Math.round(top)}px`;
+}
+
+function renderDock() {
+    const key = getTodayKey();
+    const rec = days[key] || {};
+    const todayTasks = tasks.filter(t => t.today === key);
+    const left = todayTasks.filter(t => !t.completed).length;
+    const done = todayTasks.length - left;
+    const detached = isDockDetached();
+
+    dockEl.classList.toggle('hidden', dockState.hidden && !detached);
+    dockEl.classList.toggle('collapsed', dockState.collapsed && !detached);
+    document.getElementById('btn-toggle-dock').classList.toggle('active', !dockState.hidden);
+
+    dq('#dock-count').textContent = `${done} / ${todayTasks.length}`;
+    dq('#dock-progress-fill').style.width =
+        todayTasks.length ? `${Math.round(done / todayTasks.length * 100)}%` : '0%';
+
+    const focusBox = dq('#dock-focus');
+    focusBox.classList.toggle('hidden', !rec.focus);
+    if (rec.focus) focusBox.innerHTML = `<small>今日いちばん大事なこと</small>${escapeHTML(rec.focus)}`;
+
+    const sorted = [...todayTasks].sort((a, b) =>
+        (a.completed - b.completed) ||
+        QUADRANT_ORDER[taskQuadrant(a)] - QUADRANT_ORDER[taskQuadrant(b)]
+    );
+    const list = dq('#dock-list');
+    list.innerHTML = sorted.length === 0
+        ? '<li class="item-empty">今日やることはまだありません。下の欄から追加できます。</li>'
+        : taskRowsHTML(sorted, 'dock', () => ({ check: true, showQuadrant: true, followUp: true }));
+    restoreFollowUpFocus(list);
+
+    positionDock();
+
+    const pipBtn = dq('#btn-dock-pip');
+    pipBtn.classList.toggle('active', detached);
+    pipBtn.title = detached ? 'ページ内に戻す' : '別ウィンドウ（最前面）で表示';
+    dq('#btn-dock-close').title = detached ? '小窓を閉じる' : 'パネルを閉じる';
+}
+
+// ---- 別ウィンドウ表示 ----
+//  Chrome / Edge: Document Picture-in-Picture = 他のアプリより前に出る小窓
+//  それ以外・失敗時: 通常のポップアップ（最前面にはならないが別窓として使える）
+let detachedWin = null;
+
+function isDockDetached() {
+    return dockEl.ownerDocument !== document;
+}
+
+function closeDockWindow() {
+    const pip = window.documentPictureInPicture && window.documentPictureInPicture.window;
+    if (pip) pip.close();
+    if (detachedWin && !detachedWin.closed) detachedWin.close();
+    detachedWin = null;
+}
+
+async function toggleDockPip() {
+    if (isDockDetached()) {
+        closeDockWindow();
+        return;
+    }
+    if ('documentPictureInPicture' in window) {
+        try {
+            const pip = await window.documentPictureInPicture.requestWindow({ width: 360, height: 480 });
+            attachDockToWindow(pip);
+            showToast('最前面の小窓に表示しました');
+            return;
+        } catch (e) {
+            console.warn('PiP unavailable, falling back to popup:', e);
+        }
+    }
+    const popup = window.open('', 'tmt-today-dock', 'popup=yes,width=380,height=560');
+    if (!popup) {
+        showToast('小窓を開けませんでした（ポップアップがブロックされていないか確認してください）');
+        return;
+    }
+    popup.document.write('<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"></head><body></body></html>');
+    popup.document.close();
+    detachedWin = popup;
+    attachDockToWindow(popup);
+    showToast('別ウィンドウに表示しました（最前面固定は Chrome / Edge のみ）');
+}
+
+function attachDockToWindow(win) {
+    copyStylesToWindow(win);
+    win.document.title = '今日やること';
+    win.document.body.classList.add('pip-body');
+
+    dockEl.classList.add('in-pip');
+    win.document.body.append(dockEl);
+    renderDock();
+
+    win.addEventListener('pagehide', () => {
+        dockEl.classList.remove('in-pip');
+        document.body.append(dockEl);
+        detachedWin = null;
+        renderDock();
+    });
+}
+
+function copyStylesToWindow(win) {
+    // 自前のCSSは中身をその場でコピーする（<link>は読み込み待ちの間だけ無装飾になるため）
+    const inline = win.document.createElement('style');
+    try {
+        inline.textContent = [...document.styleSheets]
+            .filter(sheet => !sheet.href || sheet.href.startsWith(location.origin))
+            .map(sheet => [...sheet.cssRules].map(rule => rule.cssText).join('\n'))
+            .join('\n');
+    } catch (e) {
+        console.warn('Could not inline styles:', e);
+    }
+    win.document.head.append(inline);
+
+    // フォントやアイコン（CDN）は <link> をそのまま複製する
+    document.querySelectorAll('link[rel="stylesheet"], link[rel="preconnect"]').forEach(node => {
+        if (node.href.startsWith(location.origin)) return;
+        const link = win.document.createElement('link');
+        link.rel = node.rel;
+        link.href = node.href;
+        if (node.crossOrigin) link.crossOrigin = node.crossOrigin;
+        win.document.head.append(link);
+    });
+    syncThemeTo(win);
+}
+
+// テーマ（CSS変数）の変更を別ウィンドウにも反映する
+function syncPipTheme() {
+    const pip = window.documentPictureInPicture && window.documentPictureInPicture.window;
+    syncThemeTo(pip || (detachedWin && !detachedWin.closed ? detachedWin : null));
+}
+
+function syncThemeTo(win) {
+    if (!win || !win.document || !win.document.documentElement) return;
+    win.document.documentElement.style.cssText = document.documentElement.style.cssText;
+    win.document.documentElement.dataset.themeMode = document.documentElement.dataset.themeMode || '';
+}
+
+// ==========================================================================
 // Filtering Tasks (マトリックス・ボード用。未仕分けは除く)
 // ==========================================================================
 function getFilteredTasks() {
@@ -1101,6 +1433,7 @@ function getFilteredTasks() {
 // ==========================================================================
 function renderAll() {
     updateHeaderStats();
+    renderDock();
     if (currentView === 'today') renderToday();
     if (currentView === 'matrix') renderMatrixGraph();
     if (currentView === 'board') renderBoard();
@@ -1590,6 +1923,7 @@ function setupThemeEditor() {
 function setTheme(theme, sourceInput = null) {
     currentTheme = applyTheme(theme);
     saveTheme(currentTheme);
+    syncPipTheme();
     syncThemeEditor(sourceInput);
     if (currentView === 'matrix') renderMatrixGraph();
     clearTimeout(setTheme.fileTimer);

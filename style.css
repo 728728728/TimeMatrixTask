@@ -1763,3 +1763,175 @@ input[type="text"]:focus, input[type="datetime-local"]:focus, select:focus, text
     .theme-fields { grid-template-columns: 1fr; }
     #btn-open-theme { flex: 0 0 auto; min-width: 40px; }
 }
+
+/* ==========================================================================
+   今日やること・フローティングドック
+   ========================================================================== */
+.today-dock {
+    position: fixed;
+    top: 92px;
+    right: 20px;
+    z-index: 900;
+    width: 330px;
+    max-width: calc(100vw - 24px);
+    display: flex;
+    flex-direction: column;
+    background: rgba(var(--surface-rgb), 0.72);
+    backdrop-filter: blur(28px) saturate(180%);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    border: 1.5px solid var(--border-glass-bright);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 24px 60px rgba(var(--shadow-rgb), calc(0.6 * var(--shadow-strength))),
+                inset 0 1px 2px rgba(var(--ink-rgb), 0.3);
+    overflow: hidden;
+}
+
+.dock-head {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 8px 8px 10px;
+    border-bottom: 1px solid rgba(var(--ink-rgb), 0.1);
+}
+.today-dock.collapsed .dock-head { border-bottom: none; }
+
+.dock-pill-btn {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: none;
+    border: none;
+    color: var(--text-primary);
+    font-family: var(--font-main);
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    padding: 4px;
+    text-align: left;
+}
+.dock-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dock-caret { font-size: 11px; color: var(--accent); transition: transform 0.2s ease; }
+.today-dock.collapsed .dock-caret { transform: rotate(-90deg); }
+.dock-count {
+    margin-left: auto;
+    font-size: 12px;
+    font-weight: 800;
+    color: var(--accent);
+    background: rgba(var(--accent-rgb), 0.14);
+    padding: 2px 8px;
+    border-radius: var(--radius-full);
+    white-space: nowrap;
+}
+
+.dock-head-actions { display: flex; gap: 2px; flex-shrink: 0; }
+.dock-icon-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition);
+}
+.dock-icon-btn:hover { color: var(--text-primary); background: rgba(var(--ink-rgb), 0.1); }
+.dock-icon-btn.active { color: var(--accent); border-color: rgba(var(--accent-rgb), 0.5); }
+
+.dock-body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.today-dock.collapsed .dock-body { display: none; }
+
+.dock-progress { height: 5px; background: rgba(var(--ink-rgb), 0.1); border-radius: var(--radius-full); overflow: hidden; }
+.dock-progress-fill { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width 0.4s ease; }
+
+.dock-focus {
+    background: rgba(var(--q3-rgb), 0.12);
+    border: 1px solid rgba(var(--q3-rgb), 0.4);
+    border-radius: var(--radius-sm);
+    padding: 7px 10px;
+    font-size: 13px;
+    overflow-wrap: anywhere;
+}
+.dock-focus small { display: block; color: var(--q3-color); font-size: 10px; font-weight: 700; margin-bottom: 2px; }
+
+.dock-list { max-height: min(46vh, 420px); overflow-y: auto; padding-right: 2px; }
+.dock-list .item-row { padding: 6px 8px; }
+.dock-list .item-title { font-size: 13px; }
+.dock-list .check-btn { width: 24px; height: 24px; font-size: 11px; }
+.dock-list .mini-btn { padding: 4px 7px; font-size: 11px; }
+
+.dock-add {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid var(--border-glass);
+    border-radius: var(--radius-sm);
+    padding: 0 10px;
+    background: rgba(var(--shade-rgb), 0.25);
+}
+.dock-add i { color: var(--text-muted); font-size: 12px; }
+.dock-add input {
+    flex: 1;
+    min-width: 0;
+    background: none;
+    border: none;
+    box-shadow: none;
+    padding: 9px 0;
+    font-size: 13px;
+    color: var(--text-primary);
+}
+.dock-add:focus-within { border-color: var(--accent); box-shadow: 0 0 12px var(--accent-glow); }
+.dock-add input:focus { box-shadow: none; background: none; }
+
+/* 「次にやること」入力行 */
+.followup-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px 6px 20px;
+    list-style: none;
+}
+.followup-row > i { color: var(--accent); font-size: 11px; flex-shrink: 0; }
+.followup-input {
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
+    padding: 7px 10px;
+    border-radius: var(--radius-sm);
+}
+.chain-icon { color: var(--text-muted); font-size: 10px; }
+
+/* 最前面の小窓に入ったとき */
+.pip-body {
+    margin: 0;
+    background: var(--bg-dark);
+    font-family: var(--font-main);
+    color: var(--text-primary);
+}
+.today-dock.in-pip {
+    position: static;
+    width: 100%;
+    max-width: none;
+    height: 100vh;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+.today-dock.in-pip .dock-body { flex: 1; overflow-y: auto; }
+.today-dock.in-pip .dock-list { max-height: none; overflow: visible; }
+
+@media (max-width: 900px) {
+    .today-dock { top: auto; bottom: 16px; right: 12px; width: 300px; }
+    .dock-list { max-height: 40vh; }
+}
+
+body.dock-pushes .app-container { padding-right: 368px; }
+@media (max-width: 1099px) { body.dock-pushes .app-container { padding-right: 24px; } }

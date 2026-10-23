@@ -8,3 +8,6 @@ Thumbs.db
 .vscode/
 node_modules/
 .env
+
+# File System Access API swap files
+*.crswap
