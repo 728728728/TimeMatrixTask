@@ -9,8 +9,11 @@ Matrix Hub と同じ tasks_data.json を読み書きするので、どちらで�
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
+import winsound
+import socket
 import tkinter as tk
 import tkinter.font as tkfont
 from datetime import datetime, timedelta
@@ -21,6 +24,8 @@ STATE_PATH = os.path.join(BASE_DIR, '.widget_state.json')
 
 DAY_START_HOUR = 4      # 深夜4時までは前の日あつかい（アプリ本体と合わせる）
 POLL_MS = 2000          # ファイルの変更を見にいく間隔
+ALERT_MS = 30000        # 期限を見張る間隔
+ALERT_LEAD_MIN = [60, 30, 10, 0]   # 何分前に知らせるか（0 は時間ちょうど）
 WIDTH, HEIGHT = 340, 470
 
 DEFAULT_THEME = {
@@ -72,6 +77,23 @@ def day_label(key):
     date = datetime.strptime(key, '%Y-%m-%d')
     week = '月火水木金土日'[date.weekday()]
     return f'{date.month}/{date.day}（{week}）'
+
+
+def deadline_at(task):
+    raw = task.get('deadline')
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(str(raw))
+    except (ValueError, TypeError):
+        return None
+
+
+def minutes_left(task, now=None):
+    due = deadline_at(task)
+    if not due:
+        return None
+    return (due - (now or datetime.now())).total_seconds() / 60
 
 
 def deadline_label(task):
@@ -184,6 +206,19 @@ class Store:
         day = self.payload.get('days', {}).get(today_key())
         return (day or {}).get('focus') or ''
 
+    def due_tasks(self, within_hours=36):
+        """期限が迫っている未完了のタスク。近い順。"""
+        found = []
+        for task in self.payload.get('tasks', []):
+            if not isinstance(task, dict) or task.get('completed'):
+                continue
+            left = minutes_left(task)
+            if left is None or left > within_hours * 60:
+                continue
+            found.append((left, task))
+        found.sort(key=lambda pair: pair[0])
+        return found
+
 
 def quadrant_of(task):
     urgency = task.get('urgency', 50) or 0
@@ -230,6 +265,8 @@ class Widget:
         self.collapsed = bool(self.state.get('collapsed'))
         self.follow_up_for = None
         self.row_widgets = []
+        self.alerted = self.state.get('alerted') or {}   # {タスクid: [知らせた段階]}
+        self.alert_banner = None
 
         root.title('今日やること')
         root.attributes('-topmost', True)
@@ -241,6 +278,7 @@ class Widget:
         self.build()
         self.refresh(force=True)
         self.poll()
+        self.root.after(3000, self.check_deadlines)
 
     # --- 位置・状態の記憶 ---
     def default_geometry(self):
@@ -258,6 +296,7 @@ class Widget:
         if not self.collapsed:
             self.state['geometry'] = self.root.geometry()
         self.state['collapsed'] = self.collapsed
+        self.state['alerted'] = self.alerted
         try:
             with open(STATE_PATH, 'w', encoding='utf-8') as handle:
                 json.dump(self.state, handle)
@@ -467,6 +506,107 @@ class Widget:
         self.add_task(self.add_var.get())
         self.add_var.set('')
 
+    # --- 期限のお知らせ ---
+    def check_deadlines(self):
+        """期限まで 60/30/10/0 分をまたいだときと、過ぎたときに1回ずつ知らせる。"""
+        try:
+            self.store.reload()
+            due_now = []
+            live_ids = set()
+            for left, task in self.store.due_tasks():
+                task_id = str(task.get('id'))
+                live_ids.add(task_id)
+                done_stages = self.alerted.setdefault(task_id, [])
+                stage = None
+                if left < 0:
+                    stage = 'over'
+                else:
+                    for lead in ALERT_LEAD_MIN:
+                        if left <= lead:
+                            stage = str(lead)
+                            break
+                if stage and stage not in done_stages:
+                    done_stages.append(stage)
+                    due_now.append((left, task))
+            # 消えたタスクの記録は捨てる
+            for task_id in [k for k in self.alerted if k not in live_ids]:
+                del self.alerted[task_id]
+            if due_now:
+                self.save_state()
+                self.announce(due_now)
+            self.refresh()
+        except Exception as exc:                       # お知らせで落ちないように
+            print('deadline check failed:', exc, file=sys.stderr)
+        self.root.after(ALERT_MS, self.check_deadlines)
+
+    def announce(self, items):
+        titles = [str(t.get('title', '')) for _, t in items]
+        left = items[0][0]
+        if left < 0:
+            headline = '期限を過ぎています'
+        elif left < 1:
+            headline = 'いまが期限です'
+        else:
+            headline = f'あと{int(left) + 1}分で期限です'
+        self.show_banner(headline, titles)
+        self.notify(headline, '／'.join(titles)[:120])
+        try:
+            winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
+        except Exception:
+            pass
+        # たたんでいても気づけるように開いて前に出す
+        if self.collapsed:
+            self.toggle_collapse()
+        try:
+            self.root.deiconify()
+            self.root.lift()
+            self.root.attributes('-topmost', True)
+        except tk.TclError:
+            pass
+
+    def notify(self, title, body):
+        """Windows の通知を出す。失敗しても無視する（音とバナーは出ている）。"""
+        script = (
+            '[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications,'
+            ' ContentType=WindowsRuntime] > $null;'
+            '$t=[Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent('
+            '[Windows.UI.Notifications.ToastTemplateType]::ToastText02);'
+            '$n=$t.GetElementsByTagName("text");'
+            f'$n.Item(0).AppendChild($t.CreateTextNode("{title}")) > $null;'
+            f'$n.Item(1).AppendChild($t.CreateTextNode("{body}")) > $null;'
+            '[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('
+            '"Matrix Hub").Show([Windows.UI.Notifications.ToastNotification]::new($t))'
+        )
+        try:
+            subprocess.Popen(
+                ['powershell', '-NoProfile', '-WindowStyle', 'Hidden', '-Command', script],
+                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+    def show_banner(self, headline, titles):
+        if self.alert_banner is not None:
+            self.alert_banner.destroy()
+        c = self.c
+        banner = tk.Frame(self.body, bg=mix(c['bg'], c['q1'], 0.35))
+        banner.pack(fill='x', padx=10, pady=(8, 0), before=self.focus_label
+                    if self.focus_label.winfo_ismapped() else None)
+        text = '⏰ ' + headline + '\n' + '\n'.join('・' + t for t in titles[:3])
+        label = tk.Label(banner, text=text, bg=banner['bg'], fg=c['text'], font=self.f_body,
+                         justify='left', anchor='w', padx=8, pady=6, wraplength=WIDTH - 70)
+        label.pack(side='left', fill='x', expand=True)
+        close = tk.Label(banner, text='✕', bg=banner['bg'], fg=c['text'], font=self.f_small,
+                         padx=6, cursor='hand2')
+        close.pack(side='right')
+        close.bind('<Button-1>', lambda _e: self.hide_banner())
+        self.alert_banner = banner
+
+    def hide_banner(self):
+        if self.alert_banner is not None:
+            self.alert_banner.destroy()
+            self.alert_banner = None
+
     # --- 描画 ---
     def poll(self):
         if self.store.reload():
@@ -511,6 +651,18 @@ class Widget:
             self.add_row(task)
             if self.follow_up_for == task.get('id'):
                 self.add_follow_up_row(task)
+
+        # 今日のリストにないけれど、期限が迫っているもの
+        listed = {t.get('id') for t in tasks}
+        upcoming = [(left, t) for left, t in self.store.due_tasks(within_hours=24)
+                    if t.get('id') not in listed]
+        if upcoming:
+            head = tk.Label(self.list_frame, text='⏰ 期限が近いもの',
+                            bg=c['bg'], fg=c['q1'], font=self.f_small, anchor='w', pady=6)
+            head.pack(fill='x')
+            self.row_widgets.append(head)
+            for _left, task in upcoming[:5]:
+                self.add_row(task, due_only=True)
         self.on_list_resize()
 
     def add_message(self, text):
@@ -520,7 +672,16 @@ class Widget:
         label.pack(fill='x')
         self.row_widgets.append(label)
 
-    def add_row(self, task):
+    def pull_into_today(self, task_id):
+        def mutate(payload):
+            for task in payload.get('tasks', []):
+                if task.get('id') == task_id:
+                    task['today'] = today_key()
+                    break
+        self.store.update(mutate)
+        self.refresh(force=True)
+
+    def add_row(self, task, due_only=False):
         c = self.c
         done = bool(task.get('completed'))
         color = c[quadrant_of(task)] if not task.get('inbox') else c['muted']
@@ -538,7 +699,12 @@ class Widget:
         check.pack(side='left')
         check.bind('<Button-1>', lambda _e, i=task_id: self.toggle_done(i))
 
-        if not done:
+        if due_only:
+            pull = tk.Label(row, text='今日', bg=c['row'], fg=c['accent'],
+                            font=self.f_small, padx=6, cursor='hand2')
+            pull.pack(side='right')
+            pull.bind('<Button-1>', lambda _e, i=task_id: self.pull_into_today(i))
+        elif not done:
             next_btn = tk.Label(row, text='＋次', bg=c['row'], fg=c['muted'],
                                 font=self.f_small, padx=6, cursor='hand2')
             next_btn.pack(side='right')
@@ -562,6 +728,8 @@ class Widget:
         label, warn = deadline_label(task)
         if label and not done:
             bits.append(label)
+            if due_only:
+                warn = True
         if bits:
             sub = tk.Label(text, text='  '.join(bits), bg=c['row'],
                            fg=c['q1'] if warn and not done else c['muted'],
@@ -661,6 +829,50 @@ def self_test():
     root.update()
     results.append(('たたむ・戻すが動く', not widget.collapsed))
 
+    # --- 期限のお知らせ ---
+    widget.notify = lambda *a, **kw: None          # 通知は出さない
+    sent = []
+    widget.announce = lambda items: sent.append([t.get('title') for _, t in items])
+
+    soon = datetime.now() + timedelta(minutes=8)
+    overdue = datetime.now() - timedelta(hours=2)
+    far = datetime.now() + timedelta(days=3)
+    store.update(lambda payload: payload['tasks'].extend([
+        {'id': 'soon', 'title': '提出が近い', 'urgency': 80, 'importance': 80,
+         'today': None, 'completed': False, 'deadline': soon.isoformat(timespec='minutes')},
+        {'id': 'over', 'title': '過ぎている', 'urgency': 80, 'importance': 80,
+         'today': None, 'completed': False, 'deadline': overdue.isoformat(timespec='minutes')},
+        {'id': 'far', 'title': 'まだ先', 'urgency': 80, 'importance': 80,
+         'today': None, 'completed': False, 'deadline': far.isoformat(timespec='minutes')},
+    ]))
+    due = {t.get('id') for _, t in store.due_tasks(within_hours=24)}
+    results.append(('近い期限を拾う', 'soon' in due and 'over' in due))
+    results.append(('遠い期限は拾わない', 'far' not in due))
+
+    widget.check_deadlines()
+    root.update()
+    results.append(('期限を知らせる', bool(sent) and '提出が近い' in sent[0]))
+
+    before = len(sent)
+    widget.check_deadlines()
+    root.update()
+    results.append(('同じ知らせを繰り返さない', len(sent) == before))
+
+    results.append(('未完了だけ見る',
+                    all(not t.get('completed') for _, t in store.due_tasks())))
+
+    widget.pull_into_today('soon')
+    root.update()
+    pulled = [t for t in json.load(open(data, encoding='utf-8'))['tasks'] if t['id'] == 'soon'][0]
+    results.append(('期限のものを今日へ入れられる', pulled['today'] == key))
+
+    widget.show_banner('あと1分', ['提出が近い'])
+    root.update()
+    results.append(('お知らせ帯が出る', widget.alert_banner is not None))
+    widget.hide_banner()
+    root.update()
+    results.append(('お知らせ帯を消せる', widget.alert_banner is None))
+
     root.destroy()
     shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -671,9 +883,29 @@ def self_test():
     return 0 if all(ok for _, ok in results) else 1
 
 
+SINGLE_INSTANCE_PORT = 8731
+_instance_lock = None
+
+
+def claim_single_instance():
+    """二重起動を防ぐ。すでに動いていれば False。"""
+    global _instance_lock
+    _instance_lock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        _instance_lock.bind(('127.0.0.1', SINGLE_INSTANCE_PORT))
+        _instance_lock.listen(1)
+        return True
+    except OSError:
+        _instance_lock.close()
+        _instance_lock = None
+        return False
+
+
 def main():
     if '--selftest' in sys.argv:
         return self_test()
+    if not claim_single_instance():
+        return 0            # もう出ている
     root = tk.Tk()
     store = Store(DATA_PATH)
     Widget(root, store)

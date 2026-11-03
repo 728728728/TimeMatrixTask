@@ -168,7 +168,25 @@ const dq = (sel) => dockEl.querySelector(sel);
 // Initialization
 // ==========================================================================
 window.addEventListener('DOMContentLoaded', async () => {
-    await loadTasksWithSafetyFallback();
+    const onServer = await detectServerMode();
+    if (onServer) {
+        // サーバー経由なら、画面を出す前にファイルを読み込む
+        try {
+            await loadFromServer();
+        } catch (e) {
+            console.warn('Server load failed, falling back to local copies:', e);
+            await loadTasksWithSafetyFallback();
+            showToast('ファイルを読み込めなかったので、ブラウザ内の控えを使います');
+        }
+        try {
+            const hist = localStorage.getItem(HISTORY_KEY);
+            backupHistory = hist ? JSON.parse(hist) : [];
+            if (!Array.isArray(backupHistory)) backupHistory = [];
+        } catch (e) { backupHistory = []; }
+        saveTasks(true, true);   // 読み込んだ直後はファイルへ書き戻さない
+    } else {
+        await loadTasksWithSafetyFallback();
+    }
     setupDirectFileSyncListeners();
     updateFileSyncUI();
     setupEventListeners();
@@ -177,6 +195,16 @@ window.addEventListener('DOMContentLoaded', async () => {
     setupThemeEditor();
     setupDock();
     renderAll();
+
+    if (serverMode) {
+        applyServerModeUI();
+        updateServerStatus();
+        setInterval(checkServerForExternalChanges, 2500);
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) checkServerForExternalChanges();
+        });
+        return;
+    }
 
     // ブラウザを閉じて再起動した後も前回の接続ファイルへ自動再接続
     await initAndRestoreDirectFileSync();
@@ -407,6 +435,7 @@ function saveTasks(silent = false, skipDirectFile = false) {
 
     // Direct Local File Sync (if linked)
     if (!skipDirectFile && activeFileHandle) saveToDirectLocalFile(true);
+    if (!skipDirectFile && serverMode) scheduleServerSave();
 
     updateHeaderStats();
     updateSaveIndicator();
@@ -693,6 +722,11 @@ function setupEventListeners() {
     window.addEventListener('beforeunload', () => {
         saveTasks(true);
         closeDockWindow();
+        if (serverMode && (serverDirty || serverSaveTimer)) {
+            // 閉じる瞬間の変更も取りこぼさない
+            navigator.sendBeacon('api/data', new Blob([JSON.stringify(buildFilePayload())],
+                                                     { type: 'application/json' }));
+        }
     });
 }
 
@@ -2634,6 +2668,116 @@ async function saveToDirectLocalFile(silent = false) {
         }
     } finally {
         isSyncingFile = false;
+    }
+}
+
+// ==========================================================================
+// サーバー連携モード
+//   ローカルサーバー（server.py）経由で開いているときは、
+//   起動した時点で tasks_data.json を自動で読み込み、変更も自動で書き戻す。
+//   ブラウザの「フォルダ連携」をやり直す必要がない。
+// ==========================================================================
+let serverMode = false;
+let serverStamp = 0;
+let serverSaveTimer = null;
+let serverSaving = false;
+let serverDirty = false;
+
+async function detectServerMode() {
+    if (!/^https?:$/.test(location.protocol)) return false;
+    try {
+        const response = await fetch('api/ping', { cache: 'no-store' });
+        if (!response.ok) return false;
+        const info = await response.json();
+        serverMode = info.app === 'TimeMatrixTask';
+        return serverMode;
+    } catch (e) {
+        return false;
+    }
+}
+
+async function loadFromServer() {
+    const response = await fetch('api/data', { cache: 'no-store' });
+    if (!response.ok) throw new Error(`読み込みに失敗しました (${response.status})`);
+    serverStamp = Number(response.headers.get('X-Data-Stamp')) || 0;
+    const payload = parseDataPayload(await response.json());
+    if (payload) applyDataPayload(payload);
+    return payload;
+}
+
+// 連続した変更をまとめて1回だけ送る
+function scheduleServerSave() {
+    if (!serverMode) return;
+    serverDirty = true;
+    clearTimeout(serverSaveTimer);
+    serverSaveTimer = setTimeout(pushToServer, 400);
+}
+
+async function pushToServer() {
+    if (!serverMode || serverSaving) return;
+    serverSaving = true;
+    serverDirty = false;
+    try {
+        const response = await fetch('api/data', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(buildFilePayload(), null, 2)
+        });
+        if (!response.ok) throw new Error(`保存に失敗しました (${response.status})`);
+        serverStamp = (await response.json()).stamp || serverStamp;
+        updateServerStatus();
+    } catch (e) {
+        console.warn('Server save failed:', e);
+        updateServerStatus(e.message);
+    } finally {
+        serverSaving = false;
+        if (serverDirty) scheduleServerSave();   // 保存中に来た変更を取りこぼさない
+    }
+}
+
+// 小窓（today_widget.pyw）など、外からの変更を取り込む
+async function checkServerForExternalChanges() {
+    if (!serverMode || serverSaving || serverDirty || document.hidden) return;
+    try {
+        const response = await fetch('api/stamp', { cache: 'no-store' });
+        if (!response.ok) return;
+        const { stamp } = await response.json();
+        if (!stamp || stamp <= serverStamp) return;
+        await loadFromServer();
+        renderAll();
+        showToast('デスクトップの小窓での変更を取り込みました');
+    } catch (e) {
+        console.warn('Server watch error:', e);
+    }
+}
+
+function updateServerStatus(error) {
+    const badge = document.getElementById('file-sync-status');
+    const text = document.getElementById('file-sync-text');
+    if (!badge || !text) return;
+    badge.classList.toggle('active', !error);
+    const time = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    text.innerHTML = error
+        ? `<i class="fa-solid fa-triangle-exclamation"></i> 保存できません：${escapeHTML(error)}`
+        : `<i class="fa-solid fa-bolt"></i> <strong>tasks_data.json</strong> と自動同期中 (${time})`;
+}
+
+// サーバー経由のときは、手動のファイル連携ボタンは不要なので隠す
+function applyServerModeUI() {
+    ['btn-link-local-file', 'btn-direct-save-file'].forEach(id => {
+        const element = document.getElementById(id);
+        if (element) element.classList.add('hidden');
+    });
+    const badge = document.getElementById('file-sync-status');
+    if (badge) {
+        badge.style.cursor = 'default';
+        badge.title = 'ローカルサーバー経由で tasks_data.json と直接つながっています';
+    }
+    const guide = document.querySelector('.direct-sync-guide-box');
+    if (guide) {
+        guide.innerHTML = '<strong>⚡ 自動同期中です</strong><p>このウィンドウはローカルサーバー経由で開かれているため、' +
+            '<code>tasks_data.json</code> を起動時に読み込み、変更のたびに自動保存しています。' +
+            'ファイルを選び直す操作は必要ありません。</p>';
     }
 }
 
